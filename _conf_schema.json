@@ -1,0 +1,22 @@
+{
+  "temp_file_retention": {
+    "description": "临时视频文件保留时间（秒）",
+    "type": "int",
+    "default": 3600
+  },
+  "max_search_results": {
+    "description": "搜索结果返回数量",
+    "type": "int",
+    "default": 20
+  },
+  "proxy": {
+    "description": "代理地址，如 http://host:port",
+    "type": "string",
+    "default": ""
+  },
+  "cache_dir": {
+    "description": "媒体缓存目录",
+    "type": "string",
+    "default": "/tmp/astrbot_plugin_hfapibilibili"
+  }
+}
