@@ -40,7 +40,7 @@ _CANDIDATE_FONTS = [
 ]
 
 
-@register("astrbot_plugin_bilibili", "Jinhong270", "B站视频下载器", "1.1.3")
+@register("astrbot_plugin_hfapibilibili", "Jinhong270", "B站视频下载器", "1.1.3")
 class Jinhong270BilibiliPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
