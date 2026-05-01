@@ -13,5 +13,5 @@ properties:
     description: "代理地址，如 http://host:port"
   cache_dir:
     type: string
-    default: ""
-    description: "媒体缓存目录，留空则使用系统临时目录"
+    default: "/tmp/astrbot_plugin_hfapibilibili"
+    description: "媒体缓存目录"

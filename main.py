@@ -21,6 +21,8 @@ from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
 from astrbot.api.message_components import Video, Plain, Image
 
+API_BASE_URL = "https://jinhong270-api.hf.space"
+
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Referer": "https://www.bilibili.com",
@@ -39,25 +41,34 @@ _CANDIDATE_FONTS = [
     "C:/Windows/Fonts/msyhbd.ttc",
 ]
 
+DEFAULT_CONFIG = {
+    "temp_file_retention": 3600,
+    "max_search_results": 20,
+    "proxy": "",
+    "cache_dir": "/tmp/astrbot_plugin_hfapibilibili",
+}
 
 @register("astrbot_plugin_hfapibilibili", "Jinhong270", "B站视频下载器", "1.1.3")
 class Jinhong270BilibiliPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
         config = context.get_config() or {}
-        self.api_base_url = "https://jinhong270-api.hf.space"
-        self.temp_retention = config.get("temp_file_retention", 3600)
-        self.max_search_results = config.get("max_search_results", 20)
-        self.proxy = config.get("proxy", "")
+        
+        self.temp_retention = config.get("temp_file_retention", DEFAULT_CONFIG["temp_file_retention"])
+        self.max_search_results = config.get("max_search_results", DEFAULT_CONFIG["max_search_results"])
+        self.proxy = config.get("proxy", DEFAULT_CONFIG["proxy"])
+        cache_dir = config.get("cache_dir", DEFAULT_CONFIG["cache_dir"])
+        
+        self.api_base_url = API_BASE_URL
+        
         self.user_sessions: Dict[str, dict] = {}
         self.has_ffmpeg = self._check_ffmpeg()
         self.font_path = self._find_chinese_font()
-
-        cache_dir = config.get("cache_dir", "")
+        
         if cache_dir:
             self.temp_dir = Path(cache_dir)
         else:
-            self.temp_dir = Path(tempfile.gettempdir()) / "astrbot_bilibili_cache"
+            self.temp_dir = Path(DEFAULT_CONFIG["cache_dir"])
         self.temp_dir.mkdir(parents=True, exist_ok=True)
         self._clean_task = asyncio.create_task(self._clean_temp_files_loop())
 
@@ -152,7 +163,7 @@ class Jinhong270BilibiliPlugin(Star):
             f"视频简介：{desc if desc else '无'}\n\n"
             f"点赞👍：{like}    投币🪙：{coin}\n"
             f"收藏🌟：{favorite}    转发➡️：{share}\n"
-            f"观看👀：{view}    弹幕📟：{danmaku}\n\n"
+            f"观看👀：{view}    弹幕💬：{danmaku}\n\n"
             f"原始链接：{link}\n"
             f"Plugin by Jinhong270"
         )
@@ -235,7 +246,7 @@ class Jinhong270BilibiliPlugin(Star):
         if not self.has_ffmpeg:
             return False
         cmd = [
-            "ffmpeg", "-y",
+            "ffmpeg", "y",
             "-i", str(video_path),
             "-i", str(audio_path),
             "-c", "copy",
@@ -507,7 +518,7 @@ class Jinhong270BilibiliPlugin(Star):
             draw.text((TEXT_X, int(y_base + ROW_HEIGHT - INFO_FONT_SIZE - 6)), meta, fill=(100, 100, 100), font=info_font)
 
         timestamp = int(time.time())
-        img_filename = f"search_{re.sub(r'[\\/*?:\"<>|]', '_', keyword)}_{timestamp}.png"
+        img_filename = f"search_{re.sub(r'[\\/*?:"<>|]', '_', keyword)}_{timestamp}.png"
         img_path = self.temp_dir / img_filename
         img.save(str(img_path), "PNG")
         logger.info(f"搜索图片已生成: {img_path}")
