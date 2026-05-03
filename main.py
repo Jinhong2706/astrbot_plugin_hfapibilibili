@@ -114,18 +114,29 @@ class Jinhong270BilibiliPlugin(Star):
             logger.error(f"API请求失败 {endpoint}: {e}")
             return {"error": str(e)}
 
-    async def _download_file(self, url: str, save_path: Path) -> bool:
+    async def _download_file(self, url: str, save_path: Path, max_retries=3) -> bool:
         proxy_kwargs = {"proxy": self.proxy} if self.proxy else {}
-        try:
-            async with self._session.get(url, timeout=aiohttp.ClientTimeout(total=None), **proxy_kwargs) as resp:
-                resp.raise_for_status()
-                async with aiofiles.open(save_path, 'wb') as f:
-                    async for chunk in resp.content.iter_chunked(128 * 1024):
-                        await f.write(chunk)
-            return True
-        except Exception as e:
-            logger.error(f"下载失败: {e}")
-            return False
+        for attempt in range(max_retries):
+            try:
+                async with self._session.get(url, timeout=aiohttp.ClientTimeout(total=300), **proxy_kwargs) as resp:
+                    resp.raise_for_status()
+                    data = await resp.read()
+                    async with aiofiles.open(save_path, 'wb') as f:
+                        await f.write(data)
+                if save_path.stat().st_size == 0:
+                    raise Exception("下载的文件为空")
+                return True
+            except (aiohttp.ClientPayloadError, aiohttp.ClientError, asyncio.TimeoutError) as e:
+                logger.warning(f"下载失败 (第 {attempt+1}/{max_retries} 次): {e}")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(2)
+                else:
+                    logger.error(f"下载最终失败: {e}")
+                    return False
+            except Exception as e:
+                logger.error(f"下载未知异常: {e}")
+                return False
+        return False
 
     def _format_video_info(self, data: dict) -> str:
         if not data:
@@ -330,7 +341,12 @@ class Jinhong270BilibiliPlugin(Star):
         else:
             yield event.plain_result(info_text)
 
-        download_data = await self._fetch_api(f"/bilibili/video/download/{bvid}")
+        if self.quality == "1080p":
+            download_endpoint = f"/bilibili/video/download/1080/{bvid}"
+        else:
+            download_endpoint = f"/bilibili/video/download/{bvid}"
+
+        download_data = await self._fetch_api(download_endpoint)
         if "error" in download_data:
             yield event.plain_result(f"获取下载链接失败: {download_data['error']}")
             return
@@ -674,4 +690,4 @@ class Jinhong270BilibiliPlugin(Star):
             self._clean_task.cancel()
         if self._session and not self._session.closed:
             await self._session.close()
-        logger.info("Jinhong270 Bilibili 插件已停止。")
+        logger.info("Hugging Face API Bilibili 插件已停止。")
