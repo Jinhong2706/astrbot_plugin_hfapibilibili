@@ -72,6 +72,11 @@ class Jinhong270BilibiliPlugin(Star):
         self.temp_dir.mkdir(parents=True, exist_ok=True)
         self._clean_task = asyncio.create_task(self._clean_temp_files_loop())
 
+        self._session = aiohttp.ClientSession(
+            headers=HEADERS,
+            timeout=aiohttp.ClientTimeout(total=300)
+        )
+
     @staticmethod
     def _check_ffmpeg() -> bool:
         return shutil.which("ffmpeg") is not None
@@ -99,26 +104,22 @@ class Jinhong270BilibiliPlugin(Star):
 
     async def _fetch_api(self, endpoint: str, params: dict = None) -> dict:
         url = f"{self.api_base_url}{endpoint}"
-        timeout = aiohttp.ClientTimeout(total=30)
         try:
-            async with aiohttp.ClientSession(timeout=timeout, headers=HEADERS) as session:
-                async with session.get(url, params=params) as resp:
-                    resp.raise_for_status()
-                    return await resp.json(content_type=None)
+            async with self._session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                resp.raise_for_status()
+                return await resp.json(content_type=None)
         except Exception as e:
             logger.error(f"API请求失败 {endpoint}: {e}")
             return {"error": str(e)}
 
     async def _download_file(self, url: str, save_path: Path) -> bool:
-        timeout = aiohttp.ClientTimeout(total=None)
         proxy_kwargs = {"proxy": self.proxy} if self.proxy else {}
         try:
-            async with aiohttp.ClientSession(timeout=timeout, headers=HEADERS) as session:
-                async with session.get(url, **proxy_kwargs) as resp:
-                    resp.raise_for_status()
-                    async with aiofiles.open(save_path, 'wb') as f:
-                        async for chunk in resp.content.iter_chunked(8192):
-                            await f.write(chunk)
+            async with self._session.get(url, timeout=aiohttp.ClientTimeout(total=None), **proxy_kwargs) as resp:
+                resp.raise_for_status()
+                async with aiofiles.open(save_path, 'wb') as f:
+                    async for chunk in resp.content.iter_chunked(128 * 1024):
+                        await f.write(chunk)
             return True
         except Exception as e:
             logger.error(f"下载失败: {e}")
@@ -193,15 +194,13 @@ class Jinhong270BilibiliPlugin(Star):
     async def _resolve_b23_shortlink(self, short_code: str) -> Optional[str]:
         url = f"https://b23.tv/{short_code}"
         try:
-            timeout = aiohttp.ClientTimeout(total=10)
-            async with aiohttp.ClientSession(timeout=timeout, headers=HEADERS) as session:
-                async with session.head(url, allow_redirects=False) as resp:
-                    if resp.status in (301, 302, 307, 308):
-                        location = resp.headers.get("Location", "")
-                        if location:
-                            bvid = self._extract_bvid(location)
-                            if bvid:
-                                return bvid
+            async with self._session.head(url, allow_redirects=False, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status in (301, 302, 307, 308):
+                    location = resp.headers.get("Location", "")
+                    if location:
+                        bvid = self._extract_bvid(location)
+                        if bvid:
+                            return bvid
         except Exception as e:
             logger.error(f"解析短链失败 {short_code}: {e}")
         return None
@@ -314,13 +313,22 @@ class Jinhong270BilibiliPlugin(Star):
 
         yield event.plain_result("正在下载视频，请稍候...")
 
-        success = await self._download_file(video_url, temp_video_path)
-        if not success or not temp_video_path.exists():
+        if audio_url and temp_audio_path:
+            video_task = asyncio.create_task(self._download_file(video_url, temp_video_path))
+            audio_task = asyncio.create_task(self._download_file(audio_url, temp_audio_path))
+            video_success, audio_success = await asyncio.gather(video_task, audio_task)
+        else:
+            video_success = await self._download_file(video_url, temp_video_path)
+            audio_success = True
+            temp_audio_path = None
+
+        if not video_success or not temp_video_path.exists():
             yield event.plain_result("视频下载失败。")
+            if temp_audio_path and temp_audio_path.exists():
+                temp_audio_path.unlink(missing_ok=True)
             return
 
         if audio_url and temp_audio_path:
-            audio_success = await self._download_file(audio_url, temp_audio_path)
             if not audio_success:
                 temp_video_path.unlink(missing_ok=True)
                 yield event.plain_result("音频下载失败，已取消。")
@@ -618,4 +626,6 @@ class Jinhong270BilibiliPlugin(Star):
     async def terminate(self):
         if self._clean_task and not self._clean_task.done():
             self._clean_task.cancel()
+        if self._session and not self._session.closed:
+            await self._session.close()
         logger.info("Jinhong270 Bilibili 插件已停止。")
