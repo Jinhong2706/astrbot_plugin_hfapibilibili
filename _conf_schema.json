@@ -1,22 +1,12 @@
 {
-  "temp_file_retention": {
-    "description": "临时视频文件保留时间（秒）",
-    "type": "int",
-    "default": 3600
-  },
-  "max_search_results": {
-    "description": "搜索结果返回数量",
-    "type": "int",
-    "default": 20
-  },
-  "proxy": {
-    "description": "代理地址，如 http://host:port",
+  "quality": {
+    "description": "视频画质选择：720p（直接下载）或1080p（需要ffmpeg合并）",
     "type": "string",
-    "default": ""
+    "default": "720p"
   },
   "cache_dir": {
-    "description": "媒体缓存目录",
+    "description": "视频缓存目录",
     "type": "string",
-    "default": "/tmp/astrbot_plugin_hfapibilibili"
+    "default": "/tmp/astrbot_plugin_bilibili"
   }
 }
