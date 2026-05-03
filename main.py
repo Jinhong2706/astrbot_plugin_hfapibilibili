@@ -441,7 +441,7 @@ class Jinhong270BilibiliPlugin(Star):
         if not videos:
             return None
 
-        COLS = 3
+        COLS = 5
         WIDTH = 1280
         PADDING = 16
         GAP = 12
@@ -450,11 +450,11 @@ class Jinhong270BilibiliPlugin(Star):
 
         card_w = (WIDTH - 2 * PADDING - (COLS - 1) * GAP) // COLS
         cover_h = int(card_w * 9 / 16)
-        title_font_size = max(12, int(card_w * 0.045))
-        info_font_size = max(10, int(card_w * 0.035))
-        line_spacing = 4
+        title_font_size = max(11, int(card_w * 0.038))
+        info_font_size = max(9, int(card_w * 0.030))
+        line_spacing = 3
 
-        text_h = title_font_size * 2 + line_spacing * 3 + info_font_size + 8
+        text_h = title_font_size * 2 + line_spacing * 2 + info_font_size + 8
         card_h = cover_h + text_h
         img_height = 2 * PADDING + rows * card_h + (rows - 1) * GAP
 
@@ -529,7 +529,7 @@ class Jinhong270BilibiliPlugin(Star):
                 lines.append(current_line)
             if len(lines) > 2:
                 lines = lines[:2]
-                if len(lines[1]) > 3:
+                if len(lines[1]) >= 2:
                     lines[1] = lines[1][:-2] + "..."
                 else:
                     lines[1] += "..."
