@@ -442,19 +442,19 @@ class Jinhong270BilibiliPlugin(Star):
             return None
 
         COLS = 5
-        WIDTH = 1280
-        PADDING = 16
-        GAP = 12
+        WIDTH = 1920
+        PADDING = 20
+        GAP = 14
         n = len(videos)
         rows = (n + COLS - 1) // COLS
 
         card_w = (WIDTH - 2 * PADDING - (COLS - 1) * GAP) // COLS
         cover_h = int(card_w * 9 / 16)
-        title_font_size = max(11, int(card_w * 0.038))
-        info_font_size = max(9, int(card_w * 0.030))
-        line_spacing = 3
+        title_font_size = max(13, int(card_w * 0.04))
+        info_font_size = max(10, int(card_w * 0.032))
+        line_spacing = 4
 
-        text_h = title_font_size * 2 + line_spacing * 2 + info_font_size + 8
+        text_h = title_font_size * 2 + line_spacing * 2 + info_font_size + 10
         card_h = cover_h + text_h
         img_height = 2 * PADDING + rows * card_h + (rows - 1) * GAP
 
