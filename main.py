@@ -42,12 +42,13 @@ class BilibiliPlugin(Star):
         else:
             self.temp_dir = Path(DEFAULT_CONFIG["cache_dir"])
         self.temp_dir.mkdir(parents=True, exist_ok=True)
+        self.user_sessions = {}
 
     def get_config_from_file(self):
         try:
             plugin_dir = os.path.dirname(os.path.abspath(__file__))
             config_dir = os.path.join(plugin_dir, "..", "..", "config")
-            config_path = os.path.join(config_dir, "astrbot_plugin_bilibili_config.json")
+            config_path = os.path.join(config_dir, "astrbot_plugin_hfapibilibili_config.json")
             config_path = os.path.abspath(config_path)
             
             if os.path.exists(config_path):
