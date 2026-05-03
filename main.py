@@ -88,7 +88,7 @@ class BilibiliPlugin(Star):
         logger.warning("未找到中文字体，搜索图片将使用默认字体（中文可能乱码）")
         return None
 
-    async def _generate_search_image(self, videos: list, keyword: str):
+    async def _generate_search_image(self, videos: list, keyword: str) -> Optional[Path]:
         if not videos:
             return None
 
@@ -151,15 +151,16 @@ class BilibiliPlugin(Star):
                     cover_img = PILImage.open(cover_path).convert("RGB")
                     cover_img = cover_img.resize((card_w, cover_h), PILImage.Resampling.LANCZOS)
                     img.paste(cover_img, (x, y))
-                except Exception:
+                except Exception as e:
+                    logger.warning(f"封面处理失败: {e}")
                     draw.rectangle([x, y, x + card_w, y + cover_h], fill=(200, 200, 200))
             else:
                 draw.rectangle([x, y, x + card_w, y + cover_h], fill=(200, 200, 200))
 
-            title = v.get("title", "").replace("<em class=\"keyword\">", "").replace("</em>", "")
-            author = v.get("author") or "未知"
-            play = v.get("play") or "0"
-            duration = v.get("duration") or "未知"
+            title = video.get("title", "").replace("<em class=\"keyword\">", "").replace("</em>", "")
+            author = video.get("author") or video.get("owner", {}).get("name") or "未知"
+            play = video.get("play") or video.get("stat", {}).get("view") or "0"
+            duration = video.get("duration") or "未知"
 
             title_x = x + 4
             title_y = y + cover_h + 4
@@ -195,26 +196,33 @@ class BilibiliPlugin(Star):
         img_filename = f"search_{re.sub(r'[\\/*?:"<>|]', '_', keyword)}_{timestamp}.png"
         img_path = self.temp_dir / img_filename
         img.save(str(img_path), "PNG")
+        logger.info(f"搜索图片已生成: {img_path}")
         return img_path
 
-    async def _download_file(self, url: str, save_path: Path) -> bool:
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=None)) as resp:
-                    resp.raise_for_status()
-                    async with aiofiles.open(save_path, "wb") as f:
-                        async for chunk in resp.content.iter_chunked(128 * 1024):
-                            await f.write(chunk)
-            return True
-        except Exception:
-            return False
+def _split_title_for_display(self, title: str, font, max_width: int) -> Tuple[str, str]:
+        draw = ImageDraw.Draw(PILImage.new("RGB", (1, 1)))
+        if draw.textlength(title, font=font) <= max_width:
+            return title, ""
+
+        cut = len(title) // 2
+        for _ in range(len(title)):
+            prefix = title[:cut]
+            if draw.textlength(prefix, font=font) <= max_width:
+                suffix = title[cut:]
+                if draw.textlength(suffix, font=font) > max_width:
+                    suffix = suffix[:max(1, int(max_width / (font.size or 12)))] + "..."
+                return prefix, suffix
+            cut -= 1
+            if cut <= 0:
+                break
+        return title[: len(title)//2], title[len(title)//2:] + "..."
 
     def _draw_colored_text(self, draw, text: str, xy: tuple, font, keyword: str):
         if not keyword:
             draw.text(xy, text, fill=(0, 0, 0), font=font)
             return
 
-        parts = re.split(f"({re.escape(keyword)})", text, flags=re.IGNORECASE)
+        parts = re.split(f'({re.escape(keyword)})', text, flags=re.IGNORECASE)
         x, y = xy
         for part in parts:
             if not part:
@@ -222,126 +230,6 @@ class BilibiliPlugin(Star):
             color = (255, 0, 0) if part.lower() == keyword.lower() else (0, 0, 0)
             draw.text((x, y), part, fill=color, font=font)
             x += draw.textlength(part, font=font)
-
-    async def _fetch_api(self, endpoint: str, params: dict = None) -> dict:
-        url = f"{self.api_base_url}{endpoint}"
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=30)) as resp:
-                    resp.raise_for_status()
-                    return await resp.json(content_type=None)
-        except Exception as e:
-            logger.error(f"API请求失败 {endpoint}: {e}")
-            return {"error": str(e)}
-
-    def _extract_bvid(self, text: str) -> Optional[str]:
-        patterns = [
-            r"(BV[a-zA-Z0-9]{10})",
-            r"bvid=([a-zA-Z0-9]{12})",
-            r"video/(BV[a-zA-Z0-9]{10})",
-            r"bilibili\.com/video/(BV[a-zA-Z0-9]{10})",
-            r"b23\.tv/([a-zA-Z0-9]+)"
-        ]
-        for p in patterns:
-            match = re.search(p, text)
-            if match:
-                return match.group(1)
-        return None
-
-    async def _resolve_b23_shortlink(self, short_code: str) -> Optional[str]:
-        url = f"https://b23.tv/{short_code}"
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.head(url, allow_redirects=False, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                    if resp.status in (301, 302, 307, 308):
-                        location = resp.headers.get("Location", "")
-                        if location:
-                            bvid = self._extract_bvid(location)
-                            if bvid:
-                                return bvid
-        except Exception:
-            pass
-        return None
-
-    def _format_video_info(self, data: dict) -> str:
-        if not data:
-            return "获取信息失败"
-        if "data" in data:
-            data = data["data"]
-        
-        title = data.get("title") or "未知"
-        bvid = data.get("bvid") or "未知"
-        owner = data.get("owner", {})
-        owner_name = owner.get("name") or "未知"
-        stat = data.get("stat") or {}
-        view = stat.get("view") or "0"
-        like = stat.get("like") or "0"
-        
-        text = f"标题：{title}\nUP主：{owner_name}\n播放：{view}  点赞：{like}\nBV号：{bvid}"
-        return text
-
-    def _extract_cover(self, data: dict) -> Optional[str]:
-        if not data:
-            return None
-        if "data" in data:
-            data = data["data"]
-        return data.get("pic") or None
-
-    async def _process_video(self, event: AstrMessageEvent, bvid: str):
-        info_data = await self._fetch_api(f"/bilibili/video/{bvid}")
-        if "error" in info_data:
-            yield event.plain_result(f"获取视频信息失败: {info_data['error']}")
-            return
-
-        cover_url = self._extract_cover(info_data)
-        info_text = self._format_video_info(info_data)
-
-        if cover_url:
-            chain = [
-                Image.fromURL(cover_url),
-                Plain(text=info_text)
-            ]
-            yield event.chain_result(chain)
-        else:
-            yield event.plain_result(info_text)
-
-        if self.quality == "1080p":
-            yield event.plain_result("正在获取1080p视频链接（需要ffmpeg合并）...")
-            download_data = await self._fetch_api(f"/bilibili/video/download/1080/{bvid}")
-        else:
-            yield event.plain_result("正在获取720p视频链接...")
-            download_data = await self._fetch_api(f"/bilibili/video/download/{bvid}")
-
-        if "error" in download_data:
-            yield event.plain_result(f"获取下载链接失败: {download_data['error']}")
-            return
-
-        video_url = download_data.get("data", {}).get("durl", [{}])[0].get("url")
-        if not video_url:
-            yield event.plain_result("未找到视频下载链接")
-            return
-
-        yield event.plain_result(f"正在下载视频...")
-        
-        video_title = info_data.get("data", {}).get("title", "bilibili_video")
-        safe_title = re.sub(r'[\/*?:"<>|]', "", video_title) or "bilibili_video"
-        safe_title = safe_title[:50]
-        final_path = self.temp_dir / f"{safe_title}.mp4"
-
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(video_url, timeout=aiohttp.ClientTimeout(total=None)) as resp:
-                    resp.raise_for_status()
-                    async with aiofiles.open(final_path, "wb") as f:
-                        async for chunk in resp.content.iter_chunked(128 * 1024):
-                            await f.write(chunk)
-            
-            video_node = Video.fromFileSystem(str(final_path))
-            yield event.chain_result([video_node])
-            logger.info(f"文件发送成功: {final_path}")
-        except Exception as e:
-            logger.warning(f"文件发送失败: {e}")
-            yield event.plain_result(f"下载失败: {e}")
 
     @filter.regex(r".*(bilibili\.com/video/|BV[a-zA-Z0-9]{10}|b23\.tv).*")
     async def handle_bilibili_link(self, event: AstrMessageEvent):
