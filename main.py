@@ -246,7 +246,7 @@ class Jinhong270BilibiliPlugin(Star):
         if not self.has_ffmpeg:
             return False
         cmd = [
-            "ffmpeg", "y",
+            "ffmpeg", "-y",
             "-i", str(video_path),
             "-i", str(audio_path),
             "-c", "copy",
@@ -441,22 +441,27 @@ class Jinhong270BilibiliPlugin(Star):
         if not videos:
             return None
 
+        COLS = 3
         WIDTH = 1280
-        HEIGHT = 720
         PADDING = 16
+        GAP = 12
         n = len(videos)
-        ROW_HEIGHT = (HEIGHT - 2 * PADDING) / n
-        COVER_WIDTH = int(ROW_HEIGHT * 1.6)
-        COVER_HEIGHT = int(ROW_HEIGHT) - 8
-        TEXT_X = PADDING + COVER_WIDTH + 12
-        MAX_TITLE_WIDTH = WIDTH - TEXT_X - PADDING
-        TITLE_FONT_SIZE = max(14, int(ROW_HEIGHT * 0.22))
-        INFO_FONT_SIZE = max(11, int(ROW_HEIGHT * 0.16))
+        rows = (n + COLS - 1) // COLS
+
+        card_w = (WIDTH - 2 * PADDING - (COLS - 1) * GAP) // COLS
+        cover_h = int(card_w * 9 / 16)
+        title_font_size = max(12, int(card_w * 0.045))
+        info_font_size = max(10, int(card_w * 0.035))
+        line_spacing = 4
+
+        text_h = title_font_size * 2 + line_spacing * 3 + info_font_size + 8
+        card_h = cover_h + text_h
+        img_height = 2 * PADDING + rows * card_h + (rows - 1) * GAP
 
         if self.font_path:
             try:
-                title_font = ImageFont.truetype(str(self.font_path), TITLE_FONT_SIZE)
-                info_font = ImageFont.truetype(str(self.font_path), INFO_FONT_SIZE)
+                title_font = ImageFont.truetype(str(self.font_path), title_font_size)
+                info_font = ImageFont.truetype(str(self.font_path), info_font_size)
             except Exception:
                 title_font = ImageFont.load_default()
                 info_font = ImageFont.load_default()
@@ -481,41 +486,60 @@ class Jinhong270BilibiliPlugin(Star):
 
         cover_paths = await asyncio.gather(*tasks)
 
-        img = PILImage.new("RGB", (WIDTH, HEIGHT), (255, 255, 255))
+        img = PILImage.new("RGB", (WIDTH, img_height), (255, 255, 255))
         draw = ImageDraw.Draw(img)
 
         for i, (video, cover_path) in enumerate(zip(videos, cover_paths)):
-            y_base = PADDING + i * ROW_HEIGHT
-
-            if i > 0:
-                draw.line([(PADDING, y_base), (WIDTH - PADDING, y_base)], fill=(230, 230, 230), width=1)
+            row = i // COLS
+            col = i % COLS
+            x = PADDING + col * (card_w + GAP)
+            y = PADDING + row * (card_h + GAP)
 
             if cover_path and cover_path.exists():
                 try:
                     cover_img = PILImage.open(cover_path).convert("RGB")
-                    cover_img = cover_img.resize((COVER_WIDTH, COVER_HEIGHT), PILImage.Resampling.LANCZOS)
-                    img.paste(cover_img, (PADDING, int(y_base + (ROW_HEIGHT - COVER_HEIGHT) / 2)))
+                    cover_img = cover_img.resize((card_w, cover_h), PILImage.Resampling.LANCZOS)
+                    img.paste(cover_img, (x, y))
                 except Exception as e:
                     logger.warning(f"封面处理失败: {e}")
+                    draw.rectangle([x, y, x + card_w, y + cover_h], fill=(200, 200, 200))
             else:
-                draw.rectangle(
-                    [PADDING, int(y_base + (ROW_HEIGHT - COVER_HEIGHT) / 2),
-                     PADDING + COVER_WIDTH, int(y_base + (ROW_HEIGHT - COVER_HEIGHT) / 2) + COVER_HEIGHT],
-                    fill=(200, 200, 200)
-                )
+                draw.rectangle([x, y, x + card_w, y + cover_h], fill=(200, 200, 200))
 
             title = video.get("title", "").replace("<em class=\"keyword\">", "").replace("</em>", "")
             author = video.get("author") or video.get("owner", {}).get("name") or "未知"
-            duration = video.get("duration") or "未知"
             play = video.get("play") or video.get("stat", {}).get("view") or "0"
+            duration = video.get("duration") or "未知"
 
-            line1, line2 = self._split_title_for_display(title, title_font, MAX_TITLE_WIDTH)
-            self._draw_colored_text(draw, line1, (TEXT_X, int(y_base + 6)), title_font, keyword)
-            if line2:
-                self._draw_colored_text(draw, line2, (TEXT_X, int(y_base + 6 + TITLE_FONT_SIZE + 2)), title_font, keyword)
+            title_x = x + 4
+            title_y = y + cover_h + 4
+            max_title_width = card_w - 8
+            draw_temp = ImageDraw.Draw(PILImage.new("RGB", (1, 1)))
+            lines = []
+            current_line = ""
+            for char in title:
+                test_line = current_line + char
+                w = draw_temp.textlength(test_line, font=title_font)
+                if w > max_title_width and current_line:
+                    lines.append(current_line)
+                    current_line = char
+                else:
+                    current_line = test_line
+            if current_line:
+                lines.append(current_line)
+            if len(lines) > 2:
+                lines = lines[:2]
+                if len(lines[1]) > 3:
+                    lines[1] = lines[1][:-2] + "..."
+                else:
+                    lines[1] += "..."
 
-            meta = f"UP: {author} | 时长: {duration} | 播放: {play}"
-            draw.text((TEXT_X, int(y_base + ROW_HEIGHT - INFO_FONT_SIZE - 6)), meta, fill=(100, 100, 100), font=info_font)
+            for j, line in enumerate(lines):
+                self._draw_colored_text(draw, line, (title_x, title_y + j * (title_font_size + line_spacing)), title_font, keyword)
+
+            info_y = y + card_h - info_font_size - 4
+            meta = f"{author} · {play}播放 · {duration}"
+            draw.text((title_x, info_y), meta, fill=(100, 100, 100), font=info_font)
 
         timestamp = int(time.time())
         img_filename = f"search_{re.sub(r'[\\/*?:"<>|]', '_', keyword)}_{timestamp}.png"
