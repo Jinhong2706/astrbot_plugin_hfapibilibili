@@ -7,6 +7,6 @@
   "cache_dir": {
     "description": "视频缓存目录",
     "type": "string",
-    "default": "/tmp/astrbot_plugin_bilibili"
+    "default": "/tmp/astrbot_plugin_hfapibilibili"
   }
 }
