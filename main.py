@@ -24,7 +24,7 @@ DEFAULT_CONFIG = {
     "cache_dir": "/tmp/astrbot_plugin_bilibili"
 }
 
-@register("astrbot_plugin_bilibili", "Jinhong270", "B站视频下载插件", "2.0.0")
+@register("astrbot_plugin_hfapibilibili", "Jinhong270", "B站视频下载插件", "2.0.0")
 class BilibiliPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
