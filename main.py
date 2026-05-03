@@ -61,6 +61,11 @@ class BilibiliPlugin(Star):
             self.temp_dir = Path(DEFAULT_CONFIG["cache_dir"])
         self.temp_dir.mkdir(parents=True, exist_ok=True)
         self.user_sessions = {}
+        
+        self._session = aiohttp.ClientSession(
+            headers=HEADERS,
+            timeout=aiohttp.ClientTimeout(total=300)
+        )
         self.font_path = self._find_chinese_font()
 
     def get_config_from_file(self):
@@ -87,6 +92,19 @@ class BilibiliPlugin(Star):
                 return p
         logger.warning("未找到中文字体，搜索图片将使用默认字体（中文可能乱码）")
         return None
+
+async def _download_file(self, url: str, save_path: Path) -> bool:
+        proxy_kwargs = {"proxy": self.proxy} if self.proxy else {}
+        try:
+            async with self._session.get(url, timeout=aiohttp.ClientTimeout(total=None), **proxy_kwargs) as resp:
+                resp.raise_for_status()
+                async with aiofiles.open(save_path, 'wb') as f:
+                    async for chunk in resp.content.iter_chunked(128 * 1024):
+                        await f.write(chunk)
+            return True
+        except Exception as e:
+            logger.error(f"下载失败: {e}")
+            return False
 
     async def _generate_search_image(self, videos: list, keyword: str) -> Optional[Path]:
         if not videos:
