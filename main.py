@@ -164,7 +164,7 @@ class Jinhong270BilibiliPlugin(Star):
             f"点赞👍：{like}    投币🪙：{coin}\n"
             f"收藏🌟：{favorite}    转发➡️：{share}\n"
             f"观看👀：{view}    弹幕💬：{danmaku}\n\n"
-            f"原始链接：{link}\n"
+            f"原始链接：{link}\n\n"
             f"Plugin by Jinhong270"
         )
         return text
