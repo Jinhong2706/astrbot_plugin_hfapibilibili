@@ -16,6 +16,9 @@ try:
 except ImportError:
     HAS_PILLOW = False
 
+import os
+import json
+
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
@@ -50,9 +53,39 @@ DEFAULT_CONFIG = {
 
 @register("astrbot_plugin_hfapibilibili", "Jinhong270", "B站视频下载器", "1.1.3")
 class Jinhong270BilibiliPlugin(Star):
+    def get_config_from_file(self):
+        """从配置文件读取配置，适配Linux和Windows"""
+        try:
+            # 获取插件目录路径
+            plugin_dir = os.path.dirname(os.path.abspath(__file__))
+            
+            # 构建配置文件路径 (../../config/astrbot_plugin_hfapibilibili_config.json)
+            config_dir = os.path.join(plugin_dir, "..", "..", "config")
+            config_path = os.path.join(config_dir, "astrbot_plugin_hfapibilibili_config.json")
+            
+            # 确保路径是绝对路径
+            config_path = os.path.abspath(config_path)
+            
+            # 读取配置文件
+            if os.path.exists(config_path):
+                with open(config_path, 'r', encoding='utf-8-sig') as f:
+                    config = json.load(f)
+                return config
+            else:
+                logger.warning(f"配置文件不存在: {config_path}")
+                return {}
+        except Exception as e:
+            logger.warning(f"读取配置文件失败: {e}")
+            return {}
+
     def __init__(self, context: Context):
         super().__init__(context)
-        config = context.get_config() or {}
+        # 从配置文件读取配置
+        file_config = self.get_config_from_file()
+        context_config = context.get_config() or {}
+        
+        # 优先使用文件配置
+        config = {**context_config, **file_config}
         
         self.temp_retention = config.get("temp_file_retention", DEFAULT_CONFIG["temp_file_retention"])
         self.max_search_results = config.get("max_search_results", DEFAULT_CONFIG["max_search_results"])
