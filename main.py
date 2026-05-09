@@ -18,7 +18,7 @@ except ImportError:
 
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
-from astrbot.api import logger
+from astrbot.api import logger, AstrBotConfig
 from astrbot.api.message_components import Video, Plain, Image
 
 API_BASE_URL = "https://jinhong270-api.hf.space"
@@ -29,48 +29,26 @@ HEADERS = {
     "Origin": "https://www.bilibili.com"
 }
 
-_CANDIDATE_FONTS = [
-    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-    "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
-    "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
-    "/System/Library/Fonts/PingFang.ttc",
-    "/System/Library/Fonts/STHeiti Light.ttc",
-    "C:/Windows/Fonts/simhei.ttf",
-    "C:/Windows/Fonts/msyh.ttc",
-    "C:/Windows/Fonts/msyhbd.ttc",
-]
-
-DEFAULT_CONFIG = {
-    "temp_file_retention": 3600,
-    "max_search_results": 20,
-    "proxy": "",
-    "cache_dir": "/tmp/astrbot_plugin_hfapibilibili",
-    "quality": "720p"
-}
-
-@register("astrbot_plugin_hfapibilibili", "Jinhong270", "B站视频下载器", "1.1.3")
+@register("astrbot_plugin_hfapibilibili", "Jinhong270", "B站视频下载器", "1.5.0")
 class Jinhong270BilibiliPlugin(Star):
-    def __init__(self, context: Context):
+    def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
-        config = context.get_config() or {}
-        
-        self.temp_retention = config.get("temp_file_retention", DEFAULT_CONFIG["temp_file_retention"])
-        self.max_search_results = config.get("max_search_results", DEFAULT_CONFIG["max_search_results"])
-        self.proxy = config.get("proxy", DEFAULT_CONFIG["proxy"])
-        self.quality = config.get("quality", DEFAULT_CONFIG["quality"])
-        cache_dir = config.get("cache_dir", DEFAULT_CONFIG["cache_dir"])
-        
-        self.api_base_url = API_BASE_URL
-        
+
+        self.temp_retention = config.get("temp_file_retention", 600)
+        self.search_result_count = min(config.get("search_result_count", 20), 50)
+        self.proxy = config.get("proxy", "")
+        self.quality = config.get("quality", "720p")
+        cache_dir = config.get("cache_dir", "")
+        self.api_base_url = config.get("api_base_url", "https://jinhong270-api.hf.space")
+
         self.user_sessions: Dict[str, dict] = {}
         self.has_ffmpeg = self._check_ffmpeg()
         self.font_path = self._find_chinese_font()
-        
+
         if cache_dir:
             self.temp_dir = Path(cache_dir)
         else:
-            self.temp_dir = Path(DEFAULT_CONFIG["cache_dir"])
+            self.temp_dir = Path(tempfile.gettempdir()) / "astrbot_plugin_hfapibilibili"
         self.temp_dir.mkdir(parents=True, exist_ok=True)
         self._clean_task = asyncio.create_task(self._clean_temp_files_loop())
 
@@ -85,6 +63,17 @@ class Jinhong270BilibiliPlugin(Star):
 
     @staticmethod
     def _find_chinese_font() -> Optional[Path]:
+        _CANDIDATE_FONTS = [
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
+            "/System/Library/Fonts/PingFang.ttc",
+            "/System/Library/Fonts/STHeiti Light.ttc",
+            "C:/Windows/Fonts/simhei.ttf",
+            "C:/Windows/Fonts/msyh.ttc",
+            "C:/Windows/Fonts/msyhbd.ttc",
+        ]
         for font in _CANDIDATE_FONTS:
             p = Path(font)
             if p.exists():
@@ -453,7 +442,7 @@ class Jinhong270BilibiliPlugin(Star):
     async def _do_search(self, event: AstrMessageEvent, keyword: str):
         encoded_keyword = quote(keyword)
         data = await self._fetch_api(f"/bilibili/search/{encoded_keyword}",
-                                     params={"page": 1, "page_size": self.max_search_results})
+                                     params={"page": 1, "page_size": self.search_result_count})
         if "error" in data:
             yield event.plain_result(f"搜索失败: {data['error']}")
             return
@@ -473,7 +462,7 @@ class Jinhong270BilibiliPlugin(Star):
             yield event.plain_result(f"未找到关于 '{keyword}' 的视频。")
             return
 
-        videos = videos[:self.max_search_results]
+        videos = videos[:self.search_result_count]
 
         if HAS_PILLOW:
             try:

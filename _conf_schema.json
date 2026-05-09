@@ -1,12 +1,39 @@
 {
   "quality": {
-    "description": "视频画质选择：720p（直接下载）或1080p（需要ffmpeg合并）",
+    "description": "视频画质选择",
+    "hint": "720p 可直接下载；1080p 需要 ffmpeg 合并音视频流",
     "type": "string",
-    "default": "720p"
+    "default": "720p",
+    "options": ["720p", "1080p"]
   },
   "cache_dir": {
     "description": "视频缓存目录",
+    "hint": "留空则使用系统临时目录",
     "type": "string",
-    "default": "/tmp/astrbot_plugin_hfapibilibili"
+    "default": ""
+  },
+  "temp_file_retention": {
+    "description": "临时文件保留时间（秒）",
+    "hint": "建议 300-3600，超时自动清理",
+    "type": "int",
+    "default": 600
+  },
+  "search_result_count": {
+    "description": "搜索结果展示数量",
+    "hint": "设置搜索时返回的视频数量，最大值限制为 50。默认 20。",
+    "type": "int",
+    "default": 20
+  },
+  "proxy": {
+    "description": "HTTP 代理地址",
+    "hint": "可选，如 http://127.0.0.1:7890",
+    "type": "string",
+    "default": ""
+  },
+  "api_base_url": {
+    "description": "B站 API 服务地址",
+    "hint": "默认使用 Hugging Face 托管服务",
+    "type": "string",
+    "default": "https://jinhong270-api.hf.space"
   }
 }
