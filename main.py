@@ -107,23 +107,36 @@ class Jinhong270BilibiliPlugin(Star):
         proxy_kwargs = {"proxy": self.proxy} if self.proxy else {}
         for attempt in range(max_retries):
             try:
-                async with self._session.get(url, timeout=aiohttp.ClientTimeout(total=300), **proxy_kwargs) as resp:
+                timeout = aiohttp.ClientTimeout(total=300, connect=10, sock_read=30)
+                async with self._session.get(url, timeout=timeout, **proxy_kwargs) as resp:
                     resp.raise_for_status()
-                    data = await resp.read()
+                    data = bytearray()
+                    while True:
+                        try:
+                            chunk = await resp.content.readany()
+                        except aiohttp.ClientPayloadError:
+                            chunk = b''
+                        if not chunk:
+                            break
+                        data.extend(chunk)
+                    if not data:
+                        raise Exception("下载的数据为空")
                     async with aiofiles.open(save_path, 'wb') as f:
                         await f.write(data)
-                if save_path.stat().st_size == 0:
-                    raise Exception("下载的文件为空")
-                return True
-            except (aiohttp.ClientPayloadError, aiohttp.ClientError, asyncio.TimeoutError) as e:
+                    if save_path.stat().st_size == 0:
+                        raise Exception("写入文件为空")
+                    logger.info(f"下载成功: {save_path} (大小: {len(data)} bytes)")
+                    return True
+            except aiohttp.ClientPayloadError as e:
+                logger.warning(f"下载异常 (第 {attempt+1}/{max_retries} 次): {e}")
+            except (aiohttp.ClientError, asyncio.TimeoutError, Exception) as e:
                 logger.warning(f"下载失败 (第 {attempt+1}/{max_retries} 次): {e}")
-                if attempt < max_retries - 1:
-                    await asyncio.sleep(2)
-                else:
-                    logger.error(f"下载最终失败: {e}")
-                    return False
-            except Exception as e:
-                logger.error(f"下载未知异常: {e}")
+            if save_path.exists():
+                save_path.unlink(missing_ok=True)
+            if attempt < max_retries - 1:
+                await asyncio.sleep(2 + attempt * 2)
+            else:
+                logger.error(f"下载最终失败: {url}")
                 return False
         return False
 
@@ -191,6 +204,19 @@ class Jinhong270BilibiliPlugin(Star):
             match = re.search(p, text)
             if match:
                 return match.group(1)
+        return None
+
+    def _extract_avid(self, text: str) -> Optional[int]:
+        patterns = [
+            r'av(\d+)',
+            r'aid=(\d+)',
+            r'video/av(\d+)',
+            r'bilibili\.com/video/av(\d+)',
+        ]
+        for p in patterns:
+            match = re.search(p, text, re.IGNORECASE)
+            if match:
+                return int(match.group(1))
         return None
 
     async def _resolve_b23_shortlink(self, short_code: str) -> Optional[str]:
@@ -406,22 +432,116 @@ class Jinhong270BilibiliPlugin(Star):
             logger.warning(f"文件发送失败: {e}")
             yield event.plain_result(f"文件发送失败，可手动复制下载链接:\n{video_url}")
 
-    @filter.regex(r'.*(bilibili\.com/video/|BV[a-zA-Z0-9]{10}|b23\.tv).*')
-    async def handle_bilibili_link(self, event: AstrMessageEvent):
-        msg = event.message_str.strip()
-        bvid = self._extract_bvid(msg)
-        if not bvid:
+    async def _process_video_by_aid(self, event: AstrMessageEvent, aid: int):
+        info_data = await self._fetch_api(f"/bilibili/video/avid/{aid}")
+        if "error" in info_data:
+            yield event.plain_result(f"获取视频信息失败: {info_data['error']}")
             return
 
-        if not bvid.startswith("BV"):
-            resolved = await self._resolve_b23_shortlink(bvid)
-            if not resolved:
-                yield event.plain_result("短链解析失败，请稍后重试或使用完整 BV 号。")
-                return
-            bvid = resolved
+        cover_url = self._extract_cover(info_data)
+        info_text = self._format_video_info(info_data)
 
-        async for result in self._process_video_by_bvid(event, bvid):
-            yield result
+        if cover_url:
+            chain = [
+                Image.fromURL(cover_url),
+                Plain(text=info_text)
+            ]
+            yield event.chain_result(chain)
+        else:
+            yield event.plain_result(info_text)
+
+        download_data = await self._fetch_api(f"/bilibili/video/download/avid/{aid}")
+        if "error" in download_data:
+            yield event.plain_result(f"获取下载链接失败: {download_data['error']}")
+            return
+
+        streams = self._extract_best_streams(download_data, self.quality)
+        if not streams:
+            logger.warning(f"下载链接解析失败，原始响应: {download_data}")
+            yield event.plain_result("下载链接解析失败，请联系管理员。")
+            return
+
+        video_url, audio_url = streams
+        if audio_url and not self.has_ffmpeg:
+            yield event.plain_result("当前环境未安装ffmpeg，下载的视频将没有声音。")
+
+        video_title = "bilibili_video"
+        raw_data = info_data.get("data") if info_data and "data" in info_data else info_data
+        if raw_data:
+            video_title = raw_data.get("title", video_title)
+        safe_title = re.sub(r'[\\/*?:"<>|]', "", video_title) or "bilibili_video"
+        safe_title = safe_title[:50]
+        base_path = self.temp_dir / safe_title
+
+        temp_video_path = base_path.with_suffix(".video.mp4")
+        temp_audio_path = base_path.with_suffix(".audio.m4s") if audio_url else None
+        final_path = base_path.with_suffix(".mp4")
+
+        yield event.plain_result("正在下载视频，请稍候...")
+
+        if audio_url and temp_audio_path:
+            video_task = asyncio.create_task(self._download_file(video_url, temp_video_path))
+            audio_task = asyncio.create_task(self._download_file(audio_url, temp_audio_path))
+            video_success, audio_success = await asyncio.gather(video_task, audio_task)
+        else:
+            video_success = await self._download_file(video_url, temp_video_path)
+            audio_success = True
+            temp_audio_path = None
+
+        if not video_success or not temp_video_path.exists():
+            yield event.plain_result("视频下载失败。")
+            if temp_audio_path and temp_audio_path.exists():
+                temp_audio_path.unlink(missing_ok=True)
+            return
+
+        if audio_url and temp_audio_path:
+            if not audio_success:
+                temp_video_path.unlink(missing_ok=True)
+                yield event.plain_result("音频下载失败，已取消。")
+                return
+
+            merged = await self._merge_audio_video(temp_video_path, temp_audio_path, final_path)
+            if not merged:
+                temp_video_path.unlink(missing_ok=True)
+                if temp_audio_path.exists():
+                    temp_audio_path.unlink(missing_ok=True)
+                yield event.plain_result("音视频合并失败，请检查ffmpeg。")
+                return
+
+            temp_video_path.unlink(missing_ok=True)
+            temp_audio_path.unlink(missing_ok=True)
+        else:
+            final_path = temp_video_path
+
+        try:
+            video_node = Video.fromFileSystem(str(final_path))
+            await event.send(event.chain_result([video_node]))
+            logger.info(f"文件发送成功: {final_path}")
+        except Exception as e:
+            logger.warning(f"文件发送失败: {e}")
+            yield event.plain_result(f"文件发送失败，可手动复制下载链接:\n{video_url}")
+
+    @filter.regex(r'.*(bilibili\.com/video/|BV[a-zA-Z0-9]{10}|b23\.tv|av\d+).*', re.IGNORECASE)
+    async def handle_bilibili_link(self, event: AstrMessageEvent):
+        msg = event.message_str.strip()
+
+        bvid = self._extract_bvid(msg)
+        if bvid:
+            if not bvid.startswith("BV"):
+                resolved = await self._resolve_b23_shortlink(bvid)
+                if not resolved:
+                    yield event.plain_result("短链解析失败，请稍后重试或使用完整 BV 号。")
+                    return
+                bvid = resolved
+            async for result in self._process_video_by_bvid(event, bvid):
+                yield result
+            return
+
+        avid = self._extract_avid(msg)
+        if avid:
+            async for result in self._process_video_by_aid(event, avid):
+                yield result
+            return
 
     @filter.command("search")
     async def search_entry(self, event: AstrMessageEvent):
@@ -601,7 +721,7 @@ class Jinhong270BilibiliPlugin(Star):
             draw.text((title_x, info_y), meta, fill=(100, 100, 100), font=info_font)
 
         timestamp = int(time.time())
-        img_filename = f"search_{re.sub(r'[\\/*?:"<>|]', '_', keyword)}_{timestamp}.png"
+        img_filename = f"search_{re.sub(r'[\\/*?:\"<>|]', '_', keyword)}_{timestamp}.png"
         img_path = self.temp_dir / img_filename
         img.save(str(img_path), "PNG")
         logger.info(f"搜索图片已生成: {img_path}")
