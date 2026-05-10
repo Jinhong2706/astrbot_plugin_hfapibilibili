@@ -759,7 +759,7 @@ class Jinhong270BilibiliPlugin(Star):
             draw.text((x, y), part, fill=color, font=font)
             x += draw.textlength(part, font=font)
 
-    @filter.regex(r'.*', priority=50)
+    @filter.regex(r'.*')
     async def handle_user_reply(self, event: AstrMessageEvent):
         session_key = event.unified_msg_origin
         if session_key not in self.user_sessions:
