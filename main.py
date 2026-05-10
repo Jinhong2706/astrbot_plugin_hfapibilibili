@@ -21,8 +21,6 @@ from astrbot.api.star import Context, Star, register
 from astrbot.api import logger, AstrBotConfig
 from astrbot.api.message_components import Video, Plain, Image
 
-API_BASE_URL = "https://jinhong270-api.hf.space"
-
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Referer": "https://www.bilibili.com",
@@ -521,7 +519,7 @@ class Jinhong270BilibiliPlugin(Star):
             logger.warning(f"文件发送失败: {e}")
             yield event.plain_result(f"文件发送失败，可手动复制下载链接:\n{video_url}")
 
-    @filter.regex(r'.*(bilibili\.com/video/|BV[a-zA-Z0-9]{10}|b23\.tv|av\d+).*', re.IGNORECASE)
+    @filter.regex(r'(?i).*(bilibili\.com/video/|BV[a-zA-Z0-9]{10}|b23\.tv|av\d+).*')
     async def handle_bilibili_link(self, event: AstrMessageEvent):
         msg = event.message_str.strip()
 
@@ -726,24 +724,6 @@ class Jinhong270BilibiliPlugin(Star):
         img.save(str(img_path), "PNG")
         logger.info(f"搜索图片已生成: {img_path}")
         return img_path
-
-    def _split_title_for_display(self, title: str, font, max_width: int) -> Tuple[str, str]:
-        draw = ImageDraw.Draw(PILImage.new("RGB", (1, 1)))
-        if draw.textlength(title, font=font) <= max_width:
-            return title, ""
-
-        cut = len(title) // 2
-        for _ in range(len(title)):
-            prefix = title[:cut]
-            if draw.textlength(prefix, font=font) <= max_width:
-                suffix = title[cut:]
-                if draw.textlength(suffix, font=font) > max_width:
-                    suffix = suffix[:max(1, int(max_width / (font.size or 12)))] + "..."
-                return prefix, suffix
-            cut -= 1
-            if cut <= 0:
-                break
-        return title[: len(title)//2], title[len(title)//2:] + "..."
 
     def _draw_colored_text(self, draw, text: str, xy: tuple, font, keyword: str):
         if not keyword:
