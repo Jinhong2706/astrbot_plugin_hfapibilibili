@@ -49,6 +49,7 @@ class Jinhong270BilibiliPlugin(Star):
             self.temp_dir = Path(tempfile.gettempdir()) / "astrbot_plugin_hfapibilibili"
         self.temp_dir.mkdir(parents=True, exist_ok=True)
         self._clean_task = asyncio.create_task(self._clean_temp_files_loop())
+        self._session_timeout_task = asyncio.create_task(self._check_session_timeout())
 
         self._session = aiohttp.ClientSession(
             headers=HEADERS,
@@ -88,6 +89,20 @@ class Jinhong270BilibiliPlugin(Star):
                     if f.is_file() and (now - f.stat().st_mtime) > self.temp_retention:
                         f.unlink(missing_ok=True)
                 await asyncio.sleep(600)
+        except asyncio.CancelledError:
+            pass
+
+    async def _check_session_timeout(self):
+        try:
+            while True:
+                await asyncio.sleep(30)
+                now = time.time()
+                expired = [
+                    key for key, s in self.user_sessions.items()
+                    if s.get("state") == "awaiting_selection" and (now - s.get("timestamp", 0) > 180)
+                ]
+                for key in expired:
+                    self.user_sessions.pop(key, None)
         except asyncio.CancelledError:
             pass
 
@@ -541,21 +556,24 @@ class Jinhong270BilibiliPlugin(Star):
                 yield result
             return
 
+    @filter.command("searchstop", priority=1)
+    async def search_stop(self, event: AstrMessageEvent):
+        session_key = event.unified_msg_origin
+        if session_key in self.user_sessions:
+            del self.user_sessions[session_key]
+            yield event.plain_result("已退出搜索会话。")
+        event.stop_event()
+
     @filter.command("search")
-    async def search_entry(self, event: AstrMessageEvent):
-        msg = event.message_str.strip()
-        if msg == "search" or msg == "/search":
-            self.user_sessions[event.unified_msg_origin] = {"state": "awaiting_keyword"}
-            yield event.plain_result("告诉我你的关键词吧～")
+    async def search_entry(self, event: AstrMessageEvent, keyword: str = None):
+        if keyword:
+            async for result in self._do_search(event, keyword.strip()):
+                yield result
             return
 
-        parts = msg.split(maxsplit=1)
-        if len(parts) < 2:
-            yield event.plain_result("格式：search 关键词")
-            return
-        keyword = parts[1].strip()
-        async for result in self._do_search(event, keyword):
-            yield result
+        self.user_sessions[event.unified_msg_origin] = {"state": "awaiting_keyword"}
+        yield event.plain_result("告诉我你的关键词吧～")
+        event.stop_event()
 
     async def _do_search(self, event: AstrMessageEvent, keyword: str):
         encoded_keyword = quote(keyword)
@@ -611,7 +629,8 @@ class Jinhong270BilibiliPlugin(Star):
 
         self.user_sessions[event.unified_msg_origin] = {
             "state": "awaiting_selection",
-            "videos": videos
+            "videos": videos,
+            "timestamp": time.time()
         }
 
     async def _generate_search_image(self, videos: list, keyword: str) -> Optional[Path]:
@@ -756,18 +775,18 @@ class Jinhong270BilibiliPlugin(Star):
 
         if session["state"] == "awaiting_selection":
             videos = session.get("videos", [])
-            try:
-                idx = int(msg) - 1
-                if idx < 0 or idx >= len(videos):
-                    yield event.plain_result("序号无效，请重新输入有效序号：")
-                    return
-                video = videos[idx]
-                bvid = video.get("bvid") or video.get("bvid_str")
-                if not bvid:
-                    yield event.plain_result("无法获取BV号。")
-                    return
-            except ValueError:
-                yield event.plain_result("请输入有效数字序号：")
+            if not msg.isdigit():
+                return
+
+            idx = int(msg) - 1
+            if idx < 0 or idx >= len(videos):
+                yield event.plain_result("序号无效，请重新输入")
+                return
+
+            video = videos[idx]
+            bvid = video.get("bvid") or video.get("bvid_str")
+            if not bvid:
+                yield event.plain_result("获取视频信息失败")
                 return
 
             del self.user_sessions[session_key]
@@ -775,6 +794,8 @@ class Jinhong270BilibiliPlugin(Star):
                 yield result
 
     async def terminate(self):
+        if hasattr(self, '_session_timeout_task') and self._session_timeout_task and not self._session_timeout_task.done():
+            self._session_timeout_task.cancel()
         if self._clean_task and not self._clean_task.done():
             self._clean_task.cancel()
         if self._session and not self._session.closed:
