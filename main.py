@@ -443,7 +443,7 @@ class Jinhong270BilibiliPlugin(Star):
             logger.info(f"文件发送成功: {final_path}")
         except Exception as e:
             logger.warning(f"文件发送失败: {e}")
-            yield event.plain_result(f"文件发送失败，可手动复制下载链接:\n{video_url}")
+            yield event.plain_result("文件发送失败，请稍后重试。")
 
     async def _process_video_by_aid(self, event: AstrMessageEvent, aid: int):
         info_data = await self._fetch_api(f"/bilibili/video/avid/{aid}")
@@ -532,7 +532,7 @@ class Jinhong270BilibiliPlugin(Star):
             logger.info(f"文件发送成功: {final_path}")
         except Exception as e:
             logger.warning(f"文件发送失败: {e}")
-            yield event.plain_result(f"文件发送失败，可手动复制下载链接:\n{video_url}")
+            yield event.plain_result("文件发送失败，请稍后重试。")
 
     @filter.regex(r'(?i).*(bilibili\.com/video/|BV[a-zA-Z0-9]{10}|b23\.tv|av\d+).*')
     async def handle_bilibili_link(self, event: AstrMessageEvent):
