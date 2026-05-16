@@ -19,13 +19,26 @@ except ImportError:
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger, AstrBotConfig
-from astrbot.api.message_components import Video, Plain, Image
+from astrbot.api.message_components import Video, Plain, Image, File
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Referer": "https://www.bilibili.com",
     "Origin": "https://www.bilibili.com"
 }
+
+def _format_download_error(exc: BaseException) -> str:
+    if isinstance(exc, aiohttp.ClientResponseError):
+        return f"HTTP {exc.status}: {exc.message}"
+    if isinstance(exc, asyncio.TimeoutError):
+        return "请求超时"
+    text = str(exc).strip()
+    return text or type(exc).__name__
+
+def _status_code_from_exception(exc: BaseException) -> Optional[int]:
+    if isinstance(exc, aiohttp.ClientResponseError):
+        return exc.status
+    return None
 
 @register("astrbot_plugin_hfapibilibili", "Jinhong270", "B站视频下载器", "1.6.0")
 class Jinhong270BilibiliPlugin(Star):
@@ -137,81 +150,100 @@ class Jinhong270BilibiliPlugin(Star):
             pass
         return 0
 
-    async def _range_download_file(
-        self,
-        url: str,
-        save_path: Path,
-        file_size: int,
-        headers: dict = None,
-        proxy: str = None,
-        chunk_size: int = 2 * 1024 * 1024,
-        max_concurrent: int = 16
-    ) -> bool:
-        if file_size <= 0:
-            return False
-        num_chunks = (file_size + chunk_size - 1) // chunk_size
-        if num_chunks <= 1:
-            return False
-        logger.info(f"启用 Range 并发下载: {save_path.name}，大小 {file_size//1024//1024} MB，分 {num_chunks} 片，并发 {max_concurrent}")
-        save_path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            with open(save_path, "wb") as f:
-                f.truncate(file_size)
-        except Exception as e:
-            logger.warning(f"预分配文件失败: {e}")
-            return False
-        semaphore = asyncio.Semaphore(max_concurrent)
-        lock = asyncio.Lock()
-        failed = False
+    class _RangeDownloader:
+        def __init__(self, plugin, url: str, save_path: Path, file_size: int, headers: dict = None, proxy: str = None):
+            self.plugin = plugin
+            self.url = url
+            self.save_path = save_path
+            self.file_size = file_size
+            self.headers = headers or {}
+            self.proxy = proxy
+            self.chunk_size = 4 * 1024 * 1024
+            self.max_concurrent = 64
+            self.max_retries_per_chunk = 2
 
-        async def download_chunk(idx: int):
-            nonlocal failed
-            async with semaphore:
-                start = idx * chunk_size
-                end = min(start + chunk_size - 1, file_size - 1)
-                range_header = {"Range": f"bytes={start}-{end}"}
-                req_headers = {**(headers or {}), **range_header}
-                proxy_kwargs = {"proxy": proxy} if proxy else {}
+        async def _download_chunk_with_retry(self, idx: int, chunk_start: int, chunk_end: int) -> bool:
+            range_header = {"Range": f"bytes={chunk_start}-{chunk_end}"}
+            req_headers = {**self.headers, **range_header}
+            proxy_kwargs = {"proxy": self.proxy} if self.proxy else {}
+            for attempt in range(self.max_retries_per_chunk):
                 try:
-                    timeout = aiohttp.ClientTimeout(total=60)
-                    async with self._session.get(url, headers=req_headers, timeout=timeout, **proxy_kwargs) as resp:
+                    timeout = aiohttp.ClientTimeout(total=300)
+                    async with self.plugin._session.get(self.url, headers=req_headers, timeout=timeout, **proxy_kwargs) as resp:
                         if resp.status not in (200, 206):
                             raise Exception(f"HTTP {resp.status}")
                         data = await resp.read()
-                        expected = end - start + 1
+                        expected = chunk_end - chunk_start + 1
                         if len(data) != expected:
                             raise Exception(f"分片长度不符: {len(data)} vs {expected}")
-                        async with lock:
-                            with open(save_path, "r+b") as f:
-                                f.seek(start)
+                        async with self.plugin._write_lock:
+                            with open(self.save_path, "r+b") as f:
+                                f.seek(chunk_start)
                                 f.write(data)
                     return True
                 except Exception as e:
-                    logger.warning(f"分片 {idx} 下载失败: {e}")
-                    failed = True
-                    return False
-
-        tasks = [download_chunk(i) for i in range(num_chunks)]
-        await asyncio.gather(*tasks, return_exceptions=True)
-
-        if failed:
-            save_path.unlink(missing_ok=True)
+                    error_msg = _format_download_error(e)
+                    if attempt < self.max_retries_per_chunk - 1:
+                        logger.warning(f"分片 {idx} 第 {attempt+1} 次失败: {error_msg}，重试")
+                        await asyncio.sleep(1 * (attempt + 1))
+                    else:
+                        logger.warning(f"分片 {idx} 最终失败: {error_msg}")
+                        return False
             return False
 
-        if save_path.stat().st_size != file_size:
-            logger.warning("Range 下载大小校验失败")
-            save_path.unlink(missing_ok=True)
-            return False
+        async def run(self) -> bool:
+            num_chunks = (self.file_size + self.chunk_size - 1) // self.chunk_size
+            if num_chunks <= 1:
+                return False
+            logger.info(f"启用 Range 并发下载: {self.save_path.name}，大小 {self.file_size//1024//1024} MB，分 {num_chunks} 片，并发 {self.max_concurrent}")
+            self.save_path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                with open(self.save_path, "wb") as f:
+                    f.truncate(self.file_size)
+            except Exception as e:
+                logger.warning(f"预分配文件失败: {e}")
+                return False
 
-        logger.info(f"Range 下载成功: {save_path}")
-        return True
+            semaphore = asyncio.Semaphore(self.max_concurrent)
+            self.plugin._write_lock = asyncio.Lock()
+            failed_chunks = []
+
+            async def bounded_download(idx: int, start: int, end: int):
+                async with semaphore:
+                    success = await self._download_chunk_with_retry(idx, start, end)
+                    if not success:
+                        failed_chunks.append(idx)
+
+            tasks = []
+            for i in range(num_chunks):
+                start = i * self.chunk_size
+                end = min(start + self.chunk_size - 1, self.file_size - 1)
+                tasks.append(bounded_download(i, start, end))
+            await asyncio.gather(*tasks)
+
+            if failed_chunks:
+                logger.warning(f"共有 {len(failed_chunks)} 个分片失败，降级使用普通下载")
+                self.save_path.unlink(missing_ok=True)
+                return False
+
+            if self.save_path.stat().st_size != self.file_size:
+                logger.warning("Range 下载大小校验失败")
+                self.save_path.unlink(missing_ok=True)
+                return False
+
+            logger.info(f"Range 下载成功: {self.save_path}")
+            return True
+
+    async def _range_download_file(self, url: str, save_path: Path, file_size: int, headers: dict = None, proxy: str = None) -> bool:
+        downloader = self._RangeDownloader(self, url, save_path, file_size, headers, proxy)
+        return await downloader.run()
 
     async def _download_file(self, url: str, save_path: Path, max_retries=3) -> bool:
         proxy_kwargs = {"proxy": self.proxy} if self.proxy else {}
         headers = HEADERS.copy()
 
         file_size = await self._get_file_size(url, headers, self.proxy)
-        use_range = file_size > 20 * 1024 * 1024
+        use_range = file_size > 100 * 1024 * 1024
 
         if file_size > 0:
             dynamic_timeout = min(1800, 300 + (file_size // (10 * 1024 * 1024)) * 10)
@@ -223,10 +255,7 @@ class Jinhong270BilibiliPlugin(Star):
         for attempt in range(max_retries):
             if attempt == 0 and use_range:
                 logger.info(f"尝试 Range 下载 (size={file_size//1024//1024}MB): {url}")
-                success = await self._range_download_file(
-                    url, save_path, file_size,
-                    headers=headers, proxy=self.proxy
-                )
+                success = await self._range_download_file(url, save_path, file_size, headers, self.proxy)
                 if success:
                     return True
                 logger.warning("Range 下载失败，降级为普通下载")
@@ -247,7 +276,8 @@ class Jinhong270BilibiliPlugin(Star):
                     logger.info(f"下载成功: {save_path} (size={save_path.stat().st_size} bytes)")
                     return True
             except (aiohttp.ClientError, asyncio.TimeoutError, Exception) as e:
-                logger.warning(f"下载失败 (第 {attempt+1}/{max_retries} 次): {e}")
+                error_msg = _format_download_error(e)
+                logger.warning(f"下载失败 (第 {attempt+1}/{max_retries} 次): {error_msg}")
                 if save_path.exists():
                     save_path.unlink(missing_ok=True)
                 if attempt < max_retries - 1:
@@ -455,6 +485,44 @@ class Jinhong270BilibiliPlugin(Star):
             logger.error(f"ffmpeg调用异常: {e}")
             return False
 
+    async def _send_combined_or_separate(
+        self,
+        event: AstrMessageEvent,
+        video_path: Path,
+        audio_path: Optional[Path],
+        final_path: Path,
+        video_title: str
+    ) -> bool:
+        if audio_path and not self.has_ffmpeg and self.quality == "1080p":
+            video_node = Video.fromFileSystem(str(video_path))
+            audio_node = File(file=str(audio_path), name=f"{video_title}_音频.m4s")
+            try:
+                await event.send(event.chain_result([video_node]))
+                await event.send(event.chain_result([audio_node]))
+                logger.info(f"已分别发送视频和音频: {video_path}, {audio_path}")
+                return True
+            except Exception as e:
+                logger.warning(f"分别发送音视频失败: {e}")
+                return False
+        else:
+            if audio_path:
+                merged = await self._merge_audio_video(video_path, audio_path, final_path)
+                if not merged:
+                    return False
+                video_path.unlink(missing_ok=True)
+                audio_path.unlink(missing_ok=True)
+                final_video = final_path
+            else:
+                final_video = video_path
+            try:
+                video_node = Video.fromFileSystem(str(final_video))
+                await event.send(event.chain_result([video_node]))
+                logger.info(f"文件发送成功: {final_video}")
+                return True
+            except Exception as e:
+                logger.warning(f"文件发送失败: {e}")
+                return False
+
     async def _process_video_by_bvid(self, event: AstrMessageEvent, bvid: str):
         info_data = await self._fetch_api(f"/bilibili/video/{bvid}")
         if "error" in info_data:
@@ -490,8 +558,6 @@ class Jinhong270BilibiliPlugin(Star):
             return
 
         video_url, audio_url = streams
-        if audio_url and not self.has_ffmpeg:
-            yield event.plain_result("当前环境未安装ffmpeg，下载的视频将没有声音。")
 
         video_title = "bilibili_video"
         raw_data = info_data.get("data") if info_data and "data" in info_data else info_data
@@ -522,32 +588,16 @@ class Jinhong270BilibiliPlugin(Star):
                 temp_audio_path.unlink(missing_ok=True)
             return
 
-        if audio_url and temp_audio_path:
-            if not audio_success:
-                temp_video_path.unlink(missing_ok=True)
-                yield event.plain_result("音频下载失败，已取消。")
-                return
-
-            merged = await self._merge_audio_video(temp_video_path, temp_audio_path, final_path)
-            if not merged:
-                temp_video_path.unlink(missing_ok=True)
-                if temp_audio_path.exists():
-                    temp_audio_path.unlink(missing_ok=True)
-                yield event.plain_result("音视频合并失败，请检查ffmpeg。")
-                return
-
+        if audio_url and temp_audio_path and not audio_success:
             temp_video_path.unlink(missing_ok=True)
-            temp_audio_path.unlink(missing_ok=True)
-        else:
-            final_path = temp_video_path
+            yield event.plain_result("音频下载失败，已取消。")
+            return
 
-        try:
-            video_node = Video.fromFileSystem(str(final_path))
-            await event.send(event.chain_result([video_node]))
-            logger.info(f"文件发送成功: {final_path}")
-        except Exception as e:
-            logger.warning(f"文件发送失败: {e}")
-            yield event.plain_result("文件发送失败，请稍后重试。")
+        send_success = await self._send_combined_or_separate(
+            event, temp_video_path, temp_audio_path, final_path, safe_title
+        )
+        if not send_success:
+            yield event.plain_result("发送视频失败，请稍后重试。")
 
     async def _process_video_by_aid(self, event: AstrMessageEvent, aid: int):
         info_data = await self._fetch_api(f"/bilibili/video/avid/{aid}")
@@ -579,8 +629,6 @@ class Jinhong270BilibiliPlugin(Star):
             return
 
         video_url, audio_url = streams
-        if audio_url and not self.has_ffmpeg:
-            yield event.plain_result("当前环境未安装ffmpeg，下载的视频将没有声音。")
 
         video_title = "bilibili_video"
         raw_data = info_data.get("data") if info_data and "data" in info_data else info_data
@@ -611,32 +659,16 @@ class Jinhong270BilibiliPlugin(Star):
                 temp_audio_path.unlink(missing_ok=True)
             return
 
-        if audio_url and temp_audio_path:
-            if not audio_success:
-                temp_video_path.unlink(missing_ok=True)
-                yield event.plain_result("音频下载失败，已取消。")
-                return
-
-            merged = await self._merge_audio_video(temp_video_path, temp_audio_path, final_path)
-            if not merged:
-                temp_video_path.unlink(missing_ok=True)
-                if temp_audio_path.exists():
-                    temp_audio_path.unlink(missing_ok=True)
-                yield event.plain_result("音视频合并失败，请检查ffmpeg。")
-                return
-
+        if audio_url and temp_audio_path and not audio_success:
             temp_video_path.unlink(missing_ok=True)
-            temp_audio_path.unlink(missing_ok=True)
-        else:
-            final_path = temp_video_path
+            yield event.plain_result("音频下载失败，已取消。")
+            return
 
-        try:
-            video_node = Video.fromFileSystem(str(final_path))
-            await event.send(event.chain_result([video_node]))
-            logger.info(f"文件发送成功: {final_path}")
-        except Exception as e:
-            logger.warning(f"文件发送失败: {e}")
-            yield event.plain_result("文件发送失败，请稍后重试。")
+        send_success = await self._send_combined_or_separate(
+            event, temp_video_path, temp_audio_path, final_path, safe_title
+        )
+        if not send_success:
+            yield event.plain_result("发送视频失败，请稍后重试。")
 
     @filter.regex(r'(?i).*(bilibili\.com/video/|BV[a-zA-Z0-9]{10}|b23\.tv|av\d+).*')
     async def handle_bilibili_link(self, event: AstrMessageEvent):
