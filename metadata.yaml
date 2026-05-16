@@ -2,7 +2,7 @@ name: "astrbot_plugin_hfapibilibili"
 display_name: "B站视频下载"
 description: "下载B站视频，支持720p和1080p画质"
 author: "Jinhong270"
-version: "1.5.0"
+version: "1.6.0"
 repo: "https://github.com/Jinhong270/astrbot_plugin_hfapibilibili"
 astrbot_version: ">=4.16,<5"
 support_platforms:
