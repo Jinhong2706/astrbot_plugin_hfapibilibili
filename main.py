@@ -27,7 +27,7 @@ HEADERS = {
     "Origin": "https://www.bilibili.com"
 }
 
-@register("astrbot_plugin_hfapibilibili", "Jinhong270", "B站视频下载器", "1.5.0")
+@register("astrbot_plugin_hfapibilibili", "Jinhong270", "B站视频下载器", "1.6.0")
 class Jinhong270BilibiliPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -116,41 +116,145 @@ class Jinhong270BilibiliPlugin(Star):
             logger.error(f"API请求失败 {endpoint}: {e}")
             return {"error": str(e)}
 
+    async def _get_file_size(self, url: str, headers: dict = None, proxy: str = None) -> int:
+        proxy_kwargs = {"proxy": proxy} if proxy else {}
+        try:
+            async with self._session.head(url, headers=headers or {}, timeout=10, **proxy_kwargs) as resp:
+                if resp.status == 200:
+                    cl = resp.headers.get("Content-Length")
+                    if cl:
+                        return int(cl)
+            range_headers = {**(headers or {}), "Range": "bytes=0-0"}
+            async with self._session.get(url, headers=range_headers, timeout=10, **proxy_kwargs) as resp:
+                if resp.status in (200, 206):
+                    cr = resp.headers.get("Content-Range")
+                    if cr and "/" in cr:
+                        return int(cr.split("/")[-1])
+                    cl = resp.headers.get("Content-Length")
+                    if cl:
+                        return int(cl)
+        except Exception:
+            pass
+        return 0
+
+    async def _range_download_file(
+        self,
+        url: str,
+        save_path: Path,
+        file_size: int,
+        headers: dict = None,
+        proxy: str = None,
+        chunk_size: int = 2 * 1024 * 1024,
+        max_concurrent: int = 16
+    ) -> bool:
+        if file_size <= 0:
+            return False
+        num_chunks = (file_size + chunk_size - 1) // chunk_size
+        if num_chunks <= 1:
+            return False
+        logger.info(f"启用 Range 并发下载: {save_path.name}，大小 {file_size//1024//1024} MB，分 {num_chunks} 片，并发 {max_concurrent}")
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with open(save_path, "wb") as f:
+                f.truncate(file_size)
+        except Exception as e:
+            logger.warning(f"预分配文件失败: {e}")
+            return False
+        semaphore = asyncio.Semaphore(max_concurrent)
+        lock = asyncio.Lock()
+        failed = False
+
+        async def download_chunk(idx: int):
+            nonlocal failed
+            async with semaphore:
+                start = idx * chunk_size
+                end = min(start + chunk_size - 1, file_size - 1)
+                range_header = {"Range": f"bytes={start}-{end}"}
+                req_headers = {**(headers or {}), **range_header}
+                proxy_kwargs = {"proxy": proxy} if proxy else {}
+                try:
+                    timeout = aiohttp.ClientTimeout(total=60)
+                    async with self._session.get(url, headers=req_headers, timeout=timeout, **proxy_kwargs) as resp:
+                        if resp.status not in (200, 206):
+                            raise Exception(f"HTTP {resp.status}")
+                        data = await resp.read()
+                        expected = end - start + 1
+                        if len(data) != expected:
+                            raise Exception(f"分片长度不符: {len(data)} vs {expected}")
+                        async with lock:
+                            with open(save_path, "r+b") as f:
+                                f.seek(start)
+                                f.write(data)
+                    return True
+                except Exception as e:
+                    logger.warning(f"分片 {idx} 下载失败: {e}")
+                    failed = True
+                    return False
+
+        tasks = [download_chunk(i) for i in range(num_chunks)]
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+        if failed:
+            save_path.unlink(missing_ok=True)
+            return False
+
+        if save_path.stat().st_size != file_size:
+            logger.warning("Range 下载大小校验失败")
+            save_path.unlink(missing_ok=True)
+            return False
+
+        logger.info(f"Range 下载成功: {save_path}")
+        return True
+
     async def _download_file(self, url: str, save_path: Path, max_retries=3) -> bool:
         proxy_kwargs = {"proxy": self.proxy} if self.proxy else {}
+        headers = HEADERS.copy()
+
+        file_size = await self._get_file_size(url, headers, self.proxy)
+        use_range = file_size > 20 * 1024 * 1024
+
+        if file_size > 0:
+            dynamic_timeout = min(1800, 300 + (file_size // (10 * 1024 * 1024)) * 10)
+        else:
+            dynamic_timeout = 600
+
+        total_timeout = aiohttp.ClientTimeout(total=dynamic_timeout, connect=10, sock_read=dynamic_timeout)
+
         for attempt in range(max_retries):
-            try:
-                timeout = aiohttp.ClientTimeout(total=300, connect=10, sock_read=30)
-                async with self._session.get(url, timeout=timeout, **proxy_kwargs) as resp:
-                    resp.raise_for_status()
-                    data = bytearray()
-                    while True:
-                        try:
-                            chunk = await resp.content.readany()
-                        except aiohttp.ClientPayloadError:
-                            chunk = b''
-                        if not chunk:
-                            break
-                        data.extend(chunk)
-                    if not data:
-                        raise Exception("下载的数据为空")
-                    async with aiofiles.open(save_path, 'wb') as f:
-                        await f.write(data)
-                    if save_path.stat().st_size == 0:
-                        raise Exception("写入文件为空")
-                    logger.info(f"下载成功: {save_path} (大小: {len(data)} bytes)")
+            if attempt == 0 and use_range:
+                logger.info(f"尝试 Range 下载 (size={file_size//1024//1024}MB): {url}")
+                success = await self._range_download_file(
+                    url, save_path, file_size,
+                    headers=headers, proxy=self.proxy
+                )
+                if success:
                     return True
-            except aiohttp.ClientPayloadError as e:
-                logger.warning(f"下载异常 (第 {attempt+1}/{max_retries} 次): {e}")
+                logger.warning("Range 下载失败，降级为普通下载")
+
+            try:
+                async with self._session.get(url, headers=headers, timeout=total_timeout, **proxy_kwargs) as resp:
+                    resp.raise_for_status()
+                    if file_size == 0:
+                        cl = resp.headers.get("Content-Length")
+                        if cl:
+                            file_size = int(cl)
+                    save_path.parent.mkdir(parents=True, exist_ok=True)
+                    with open(save_path, "wb") as f:
+                        async for chunk in resp.content.iter_chunked(64 * 1024):
+                            f.write(chunk)
+                    if file_size > 0 and save_path.stat().st_size != file_size:
+                        raise Exception("下载大小与预期不符")
+                    logger.info(f"下载成功: {save_path} (size={save_path.stat().st_size} bytes)")
+                    return True
             except (aiohttp.ClientError, asyncio.TimeoutError, Exception) as e:
                 logger.warning(f"下载失败 (第 {attempt+1}/{max_retries} 次): {e}")
-            if save_path.exists():
-                save_path.unlink(missing_ok=True)
-            if attempt < max_retries - 1:
-                await asyncio.sleep(2 + attempt * 2)
-            else:
-                logger.error(f"下载最终失败: {url}")
-                return False
+                if save_path.exists():
+                    save_path.unlink(missing_ok=True)
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(0.5 * (2 ** attempt))
+                else:
+                    logger.error(f"下载最终失败: {url}")
+
         return False
 
     def _format_video_info(self, data: dict) -> str:
