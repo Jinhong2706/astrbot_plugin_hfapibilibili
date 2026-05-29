@@ -7,7 +7,7 @@ from typing import List, Dict, Optional
 from PIL import Image, ImageDraw, ImageFont
 from astrbot.api import logger
 
-from utils.http_client import download_file
+from ..utils.http_client import download_file
 
 async def generate_search_image(videos: List[Dict], keyword: str, temp_dir: Path,
                                 font_path: Optional[Path], session, proxy: str) -> Optional[Path]:

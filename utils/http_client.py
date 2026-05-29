@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Optional
 
 from astrbot.api import logger
-from utils.helpers import format_download_error
+from .helpers import format_download_error
 
 class RangeDownloader:
     def __init__(self, session: aiohttp.ClientSession, url: str, save_path: Path,

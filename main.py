@@ -9,15 +9,15 @@ from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
 from astrbot.api.message_components import Image, Plain
 
-from config import PluginConfig, HEADERS
-from utils.helpers import (
+from .config import PluginConfig, HEADERS
+from .utils.helpers import (
     check_ffmpeg, find_chinese_font, extract_bvid, extract_avid,
     format_video_info, extract_cover
 )
-from core.bilibili_api import BiliAPI
-from core.session_manager import SessionManager
-from core.video_processor import download_and_process_video
-from assets.image_generator import generate_search_image
+from .core.bilibili_api import BiliAPI
+from .core.session_manager import SessionManager
+from .core.video_processor import download_and_process_video
+from .assets.image_generator import generate_search_image
 
 try:
     from PIL import Image as PILImage
