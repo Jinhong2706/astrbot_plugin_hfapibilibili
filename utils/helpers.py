@@ -3,6 +3,7 @@ import time
 import shutil
 from pathlib import Path
 from typing import Optional
+
 from astrbot.api import logger
 
 def format_download_error(exc: BaseException) -> str:

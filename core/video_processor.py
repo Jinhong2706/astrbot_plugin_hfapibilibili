@@ -2,14 +2,13 @@ import asyncio
 import subprocess
 import re
 from pathlib import Path
-from typing import Optional
 
 from astrbot.api import logger
 from astrbot.api.message_components import Video, File
 
-from utils.helpers import extract_best_streams, format_video_info, extract_cover
-from utils.http_client import download_file
-from config import HEADERS
+from ..utils.helpers import extract_best_streams, format_video_info, extract_cover
+from ..utils.http_client import download_file
+from ..config import HEADERS
 
 async def merge_audio_video(video_path: Path, audio_path: Path, output_path: Path, has_ffmpeg: bool) -> bool:
     if not has_ffmpeg:
@@ -17,13 +16,11 @@ async def merge_audio_video(video_path: Path, audio_path: Path, output_path: Pat
     cmd = ["ffmpeg", "-y", "-i", str(video_path), "-i", str(audio_path), "-c", "copy", str(output_path)]
     try:
         proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-        stdout, stderr = await proc.communicate()
+        await proc.communicate()
         if proc.returncode != 0:
-            logger.error(f"ffmpeg合并失败: {stderr.decode()}")
             return False
         return True
-    except Exception as e:
-        logger.error(f"ffmpeg调用异常: {e}")
+    except Exception:
         return False
 
 async def download_and_process_video(event, bvid: str, bili_api, session, proxy, quality,
@@ -38,8 +35,7 @@ async def download_and_process_video(event, bvid: str, bili_api, session, proxy,
 
     if cover_url:
         from astrbot.api.message_components import Image, Plain
-        chain = [Image.fromURL(cover_url), Plain(text=info_text)]
-        yield event.chain_result(chain)
+        yield event.chain_result([Image.fromURL(cover_url), Plain(text=info_text)])
     else:
         yield event.plain_result(info_text)
 
@@ -88,16 +84,12 @@ async def download_and_process_video(event, bvid: str, bili_api, session, proxy,
         yield event.plain_result("音频下载失败，已取消。")
         return
 
-    if audio_path and not has_ffmpeg and quality == "1080p":
+    if audio_url and not has_ffmpeg and quality == "1080p":
         video_node = Video.fromFileSystem(str(temp_video_path))
         audio_node = File(file=str(temp_audio_path), name=f"{safe_title}_音频.m4s")
-        try:
-            await event.send(event.chain_result([video_node]))
-            await event.send(event.chain_result([audio_node]))
-            logger.info(f"已分别发送视频和音频: {temp_video_path}, {temp_audio_path}")
-        except Exception as e:
-            logger.warning(f"分别发送音视频失败: {e}")
-            yield event.plain_result("发送视频失败，请稍后重试。")
+        yield event.chain_result([video_node])
+        yield event.chain_result([audio_node])
+        logger.info(f"已分别发送视频和音频: {temp_video_path}, {temp_audio_path}")
         return
 
     if audio_url:
@@ -112,8 +104,7 @@ async def download_and_process_video(event, bvid: str, bili_api, session, proxy,
         final_video = temp_video_path
 
     try:
-        video_node = Video.fromFileSystem(str(final_video))
-        yield event.chain_result([video_node])
+        yield event.chain_result([Video.fromFileSystem(str(final_video))])
         logger.info(f"文件发送成功: {final_video}")
     except Exception as e:
         logger.warning(f"文件发送失败: {e}")
