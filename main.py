@@ -113,22 +113,22 @@ class Jinhong270BilibiliPlugin(Star):
             else:
                 yield event.plain_result("无法从 AV 号获取 BV 号。")
 
-    @filter.command("searchstop", priority=1)
+    @filter.command("停止点播", priority=1)
     async def search_stop(self, event: AstrMessageEvent):
         session_key = event.unified_msg_origin
         if self.session_mgr.get(session_key):
             self.session_mgr.delete(session_key)
-            yield event.plain_result("已退出搜索会话。")
+            yield event.plain_result("已退出点播会话。")
         event.stop_event()
 
-    @filter.command("search")
+    @filter.command("b站点播")
     async def search_entry(self, event: AstrMessageEvent, keyword: str = None):
         if keyword:
             async for result in self._do_search(event, keyword.strip()):
                 yield result
             return
         self.session_mgr.set(event.unified_msg_origin, {"state": "awaiting_keyword"})
-        yield event.plain_result("告诉我你的关键词吧～")
+        yield event.plain_result("告诉我你想点播的关键词吧～")
         event.stop_event()
 
     async def _do_search(self, event: AstrMessageEvent, keyword: str):

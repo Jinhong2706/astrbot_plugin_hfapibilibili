@@ -27,7 +27,6 @@ async def download_and_process_video(event, bvid: str, bili_api, session, proxy,
                                      has_ffmpeg, temp_dir):
     info_data = await bili_api.get_video_info(bvid)
     if "error" in info_data:
-        yield event.plain_result(f"获取视频信息失败: {info_data['error']}")
         return
 
     cover_url = extract_cover(info_data)
@@ -41,13 +40,10 @@ async def download_and_process_video(event, bvid: str, bili_api, session, proxy,
 
     download_data = await bili_api.get_download_urls(bvid, quality)
     if "error" in download_data:
-        yield event.plain_result(f"获取下载链接失败: {download_data['error']}")
         return
 
     streams = extract_best_streams(download_data, quality)
     if not streams:
-        logger.warning(f"下载链接解析失败，原始响应: {download_data}")
-        yield event.plain_result("下载链接解析失败，请联系管理员。")
         return
 
     video_url, audio_url = streams
@@ -74,14 +70,12 @@ async def download_and_process_video(event, bvid: str, bili_api, session, proxy,
         temp_audio_path = None
 
     if not video_success or not temp_video_path.exists():
-        yield event.plain_result("视频下载失败。")
         if temp_audio_path and temp_audio_path.exists():
             temp_audio_path.unlink(missing_ok=True)
         return
 
     if audio_url and temp_audio_path and not audio_success:
         temp_video_path.unlink(missing_ok=True)
-        yield event.plain_result("音频下载失败，已取消。")
         return
 
     if audio_url and not has_ffmpeg and quality == "1080p":
@@ -89,13 +83,11 @@ async def download_and_process_video(event, bvid: str, bili_api, session, proxy,
         audio_node = File(file=str(temp_audio_path), name=f"{safe_title}_音频.m4s")
         yield event.chain_result([video_node])
         yield event.chain_result([audio_node])
-        logger.info(f"已分别发送视频和音频: {temp_video_path}, {temp_audio_path}")
         return
 
     if audio_url:
         merged = await merge_audio_video(temp_video_path, temp_audio_path, final_path, has_ffmpeg)
         if not merged:
-            yield event.plain_result("音视频合并失败。")
             return
         temp_video_path.unlink(missing_ok=True)
         temp_audio_path.unlink(missing_ok=True)
@@ -105,7 +97,5 @@ async def download_and_process_video(event, bvid: str, bili_api, session, proxy,
 
     try:
         yield event.chain_result([Video.fromFileSystem(str(final_video))])
-        logger.info(f"文件发送成功: {final_video}")
-    except Exception as e:
-        logger.warning(f"文件发送失败: {e}")
-        yield event.plain_result("发送视频失败，请稍后重试。")
+    except Exception:
+        pass
