@@ -2,6 +2,7 @@ import aiohttp
 import asyncio
 import tempfile
 import time
+import re
 from pathlib import Path
 
 from astrbot.api.event import filter, AstrMessageEvent
@@ -121,14 +122,17 @@ class Jinhong270BilibiliPlugin(Star):
             yield event.plain_result("已退出点播会话。")
         event.stop_event()
 
-    @filter.command("b站点播")
-    async def search_entry(self, event: AstrMessageEvent, keyword: str = None):
+    @filter.regex(r'^(?:b站点播|B站点播)(?:\s+(.+))?$', priority=2)
+    async def on_bili_demand(self, event: AstrMessageEvent):
+        msg = event.message_str.strip()
+        m = re.match(r'^(?:b站点播|B站点播)(?:\s+(.+))?$', msg)
+        keyword = m.group(1) if m and m.group(1) else None
         if keyword:
             async for result in self._do_search(event, keyword.strip()):
                 yield result
-            return
-        self.session_mgr.set(event.unified_msg_origin, {"state": "awaiting_keyword"})
-        yield event.plain_result("告诉我你想点播的关键词吧～")
+        else:
+            self.session_mgr.set(event.unified_msg_origin, {"state": "awaiting_keyword"})
+            yield event.plain_result("告诉我你想点播的关键词吧～")
         event.stop_event()
 
     async def _do_search(self, event: AstrMessageEvent, keyword: str):
@@ -224,4 +228,4 @@ class Jinhong270BilibiliPlugin(Star):
             self._clean_task.cancel()
         if self._session and not self._session.closed:
             await self._session.close()
-        logger.info("Hugging Face API Bilibili 插件已停止。")
+        logger.info("astrbot_plugin_hfapibilibili插件已停止。")
