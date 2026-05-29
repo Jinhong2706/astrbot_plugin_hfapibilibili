@@ -26,13 +26,21 @@ try:
 except ImportError:
     HAS_PILLOW = False
 
-@register("astrbot_plugin_hfapibilibili", "Jinhong270", "B站视频下载器", "1.6.0")
+@register("astrbot_plugin_hfapibilibili", "Jinhong270", "B站视频下载器", "1.8.0")
 class Jinhong270BilibiliPlugin(Star):
     def __init__(self, context: Context, config):
         super().__init__(context)
         self.plugin_config = PluginConfig(config)
         self.has_ffmpeg = check_ffmpeg()
-        self.font_path = find_chinese_font()
+
+        custom_font = self.plugin_config.custom_font_path
+        if custom_font and Path(custom_font).exists():
+            self.font_path = Path(custom_font)
+            logger.info(f"使用自定义字体: {self.font_path}")
+        else:
+            self.font_path = find_chinese_font()
+
+        self.enable_search_image = self.plugin_config.enable_search_image
         self.session_mgr = SessionManager()
 
         if self.plugin_config.cache_dir:
@@ -159,7 +167,7 @@ class Jinhong270BilibiliPlugin(Star):
         videos = videos[:self.plugin_config.search_result_count]
 
         img_path = None
-        if HAS_PILLOW:
+        if self.enable_search_image and HAS_PILLOW:
             try:
                 img_path = await generate_search_image(
                     videos, keyword, self.temp_dir, self.font_path,

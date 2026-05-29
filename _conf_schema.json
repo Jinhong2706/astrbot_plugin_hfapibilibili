@@ -35,5 +35,17 @@
     "hint": "默认使用 Hugging Face 托管服务",
     "type": "string",
     "default": "https://jinhong270-api.hf.space"
+  },
+  "custom_font_path": {
+    "description": "自定义中文字体文件路径",
+    "hint": "留空则自动检测系统字体。支持 ttf/ttc/otf 等格式。例如：C:/Windows/Fonts/simhei.ttf 或 /usr/share/fonts/noto/NotoSansCJK-Regular.ttc",
+    "type": "string",
+    "default": ""
+  },
+  "enable_search_image": {
+    "description": "是否生成搜索图片",
+    "hint": "启用后搜索结果会以图片形式发送（需要 Pillow）。关闭则使用纯文本列表。",
+    "type": "bool",
+    "default": true
   }
 }

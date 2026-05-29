@@ -14,3 +14,5 @@ class PluginConfig:
         self.quality = config.get("quality", "720p")
         self.cache_dir = config.get("cache_dir", "")
         self.api_base_url = config.get("api_base_url", "https://jinhong270-api.hf.space")
+        self.custom_font_path = config.get("custom_font_path", "")
+        self.enable_search_image = config.get("enable_search_image", True)
