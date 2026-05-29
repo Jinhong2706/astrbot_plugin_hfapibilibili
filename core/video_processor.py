@@ -25,6 +25,11 @@ async def merge_audio_video(video_path: Path, audio_path: Path, output_path: Pat
 
 async def download_and_process_video(event, bvid: str, bili_api, session, proxy, quality,
                                      has_ffmpeg, temp_dir):
+    if quality == "1080p" and not has_ffmpeg:
+        yield event.plain_result(
+            "当前环境未安装 ffmpeg，1080p 画质下载的视频将没有声音。建议安装 ffmpeg 以获得完整体验。"
+        )
+
     info_data = await bili_api.get_video_info(bvid)
     if "error" in info_data:
         return

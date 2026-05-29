@@ -114,7 +114,7 @@ class Jinhong270BilibiliPlugin(Star):
             else:
                 yield event.plain_result("无法从 AV 号获取 BV 号。")
 
-    @filter.command("停止点播", priority=1)
+    @filter.regex(r'^\s*停止点播\s*$', priority=1)
     async def search_stop(self, event: AstrMessageEvent):
         session_key = event.unified_msg_origin
         if self.session_mgr.get(session_key):
@@ -189,7 +189,7 @@ class Jinhong270BilibiliPlugin(Star):
             "timestamp": time.time()
         })
 
-    @filter.regex(r'.*')
+    @filter.regex(r'.*', priority=100)
     async def handle_user_reply(self, event: AstrMessageEvent):
         session_key = event.unified_msg_origin
         session = self.session_mgr.get(session_key)
