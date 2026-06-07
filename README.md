@@ -2,8 +2,8 @@
 
 # 🎬 astrbot_plugin_hfapibilibili
 
-**AstrBot B站视频插件**  
-在群聊中解析 B 站视频链接 / BV 号，支持关键词搜索，自动下载并发送高清视频（支持 Dash 合并）。
+**AstrBot B 站视频插件**  
+在群聊中解析 B 站链接 / BV / AV / b23 短链，支持点播搜索并下载高清视频（支持 Dash 合并）。
 
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
 [![AstrBot](https://img.shields.io/badge/AstrBot->=4.16-green.svg)](https://github.com/Soulter/AstrBot)
@@ -16,77 +16,65 @@
 
 ## 简介
 
-本插件用于 AstrBot，在群聊中自动解析并下载 B 站（bilibili）视频。功能包括：
+本插件为 AstrBot 提供 B 站视频解析与点播功能：
 
-- 发送 B 站链接或 BV 号后自动获取视频信息与封面并下载视频。
-- 支持 b23 短链还原。
-- 支持关键字搜索（search <关键词>），搜索结果支持图文展示（需 Pillow）。
-- 对 Dash 分离流自动合并（需要已安装 ffmpeg）。
+- 自动解析并下载 B 站视频（支持 BV、AV、bilibili 链接与 b23 短链）。
+- 支持按关键词点播搜索，返回图文卡片（需 Pillow 与中文字体）或纯文本结果。
+- 支持 Dash 分离流的音视频合并（需要系统已安装 ffmpeg）。
+- 支持通过代理下���（配置项 proxy）。
 
 ---
 
-## 快速开始
+## 快速安装
 
-1. 将仓库放入 AstrBot 的插件目录（例如：data/plugins/），重启 AstrBot 或重载插件。
-2. 或在 AstrBot 插件市场搜索 `astrbot_plugin_hfapibilibili` 并安装。
-3. 安装依赖：
+1. 将本仓库放入 AstrBot 的插件目录（例如：data/plugins/），重启或重载插件；或在 AstrBot 插件市场安装 `astrbot_plugin_hfapibilibili`。
+2. 安装 Python 依赖：
 
 ```bash
 pip install -r requirements.txt
 ```
 
----
-
-## 运行环境与依赖
-
-- Python 3.10+
-- AstrBot >= 4.16（适用于 aiocqhttp 适配器）
-- 可选但推荐：ffmpeg（用于合并 Dash 音视频流）
-- 可选：Pillow（用于生成搜索结果图片）
-- 网络访问：插件通过第三方 API 获取 B 站数据，请确保容器/服务器能访问外网或所配置的 API地址。
-
----
-
-## ffmpeg 说明
-
-- 1080p 视频通常为 Dash 分离流（视频/音频为不同文件），必须安装 ffmpeg 才能合并音视频并得到带声音的完整文件。
-- 720p 多数为单文件流，通常不强制要求 ffmpeg；但部分视频仍为 Dash，建议统一安装 ffmpeg。
-
-安装示例：
-
-- Ubuntu/Debian: `sudo apt install ffmpeg`
-- macOS (Homebrew): `brew install ffmpeg`
-- Windows: 从 https://ffmpeg.org/download.html 下载并将 bin 路径加入系统 PATH
-
-插件启动时会自动检测 ffmpeg，可在未安装时给出提示。
+3. （可选）安装 ffmpeg 与中文字体以获得最佳体验。
 
 ---
 
 ## 使用说明
 
-- 直接发送视频链接或 BV 号：
+- 直接发送视频链接或编号，机器人会自动解析并开始下载：
   - 完整链接：`https://www.bilibili.com/video/BV1U47T6UE1t`
   - 纯 BV：`BV1U47T6UE1t`
-  - b23 短链：`https://b23.tv/BV14XLq64EQf`
+  - AV 号：`av116339171728674`（插件会尝试根据 AV 获取 BV 后解析）
+  - b23 短链：`https://b23.tv/BV14XLq64EQf`（会自动还原为 BV）
 
-机器人会回复视频信息与封面，并在下载完成后发送 MP4 文件。
+- 点播搜索（交互式）：
+  - 发送：`b站点播 关键词` 或 `B站点播 关键词`，插件会搜索并返回结果（图片卡或文本列表）。
+  - 若只发送 `b站点播`，插件会提示你输入关键词（进入点播会话）；随后回复关键词开始搜索。
+  - 搜索结果返回后，直接回复序号（如 `3`）即可下载对应视频。
+  - 发送 `停止点播` 可退出点播会话。
 
-- 搜索视频：发送 `search 关键词`（例如 `search 猫猫`）
-  - 若已安装 Pillow 且系统有中文字体，搜索结果会以图片卡片形式展示；否则回退为文字列表。
-  - 搜索后直接回复结果的序号（例如 `3`），机器人会下载该序号对应的视频。
+注：旧版的 `search 关键词` 写法不再作为主触发，建议使用 `b站点播` 系列命令。
 
 ---
 
-## 配置项（参考 _conf_schema.json）
+## 配置项（可在 AstrBot 插件管理界面或 _conf_schema.json 中修改）
 
-配置可在 AstrBot 插件管理界面或配置文件中修改：
+- quality: `"720p"` 或 `"1080p"`（默认 `"720p"`） — 选择视频画质；1080p 多数为 Dash 分离流，需 ffmpeg 合并。
+- cache_dir: 视频缓存目录（留空使用系统临时目录）。
+- temp_file_retention: 临时文件保留时间（秒，默认 600）。
+- search_result_count: 搜索结果数量（默认 20，最大 50）。
+- proxy: HTTP 代理地址（示例：`http://127.0.0.1:7890`）。
+- api_base_url: 插件调用的 B 站 API 地址（默认 `https://jinhong270-api.hf.space`）。
+- custom_font_path: 自定义中文字体路径（优先于系统检测）。
+- enable_search_image: 是否生成搜索图片（默认 true，需要 Pillow）。
 
-- quality: `"720p"` 或 `"1080p"`（默认 `"720p"`） — 1080p 需要 ffmpeg。
-- cache_dir: 视频缓存目录，留空则使用系统临时目录。
-- temp_file_retention: 临时文件保留秒数（默认 600）。
-- search_result_count: 搜索结果数量，最大 50（默认 20）。
-- proxy: HTTP 代理，如 `http://127.0.0.1:7890`。
-- api_base_url: 插件使用的 B 站 API 地址（默认 `https://jinhong270-api.hf.space`）。
+---
+
+## 依赖与能力说明
+
+- Python: 3.10+
+- 运行依赖：aiohttp、aiofiles，生成图片需 Pillow（requirements.txt 中列出）。
+- ffmpeg：用于合并 Dash 音视频流（1080p 等分离流必需）。插件会在启动或下载时检测 ffmpeg 是否可用。
+- 字体：若需生成中文搜索图片，请确保容器/服务器安装中文字体或在配置中指定 `custom_font_path`。
 
 ---
 
@@ -94,27 +82,29 @@ pip install -r requirements.txt
 
 Q: 下载的视频没有声音？
 
-A: 如果选择 `1080p`，必须安装 ffmpeg；720p 下部分视频也可能为 Dash 流，同样需要 ffmpeg 才有声音。
+A: 若选择 `1080p`（或目标流为 Dash 分离流），必须安装 ffmpeg 才能合并音视频。建议统一在运行环境中安装 ffmpeg。
 
-Q: 搜索结果为什么是文字而不是图片？
+Q: 搜索结果显示为纯文本而非图片？
 
-A: 图文搜索依赖 Pillow 以及系统中文字体。安装 Pillow 并确保可用字体后插件会生成图片结果。
+A: 生成图片卡依赖 Pillow 与可用的中文字体。若未安装 Pillow 或找不到字体，插件会回退为文本列表。
+
+Q: 插件如何设置代理？
+
+A: 在插件配置中填写 `proxy` 字段（例如 `http://127.0.0.1:7890`），插件的 API 请求与视频下载会走该代理。
 
 Q: 支持哪些链接格式？
 
-A: 支持 BV 号、标准视频链接（https://www.bilibili.com/video/BV...）以及 b23.tv 短链。
-
-Q: 如何设置代理？
-
-A: 在插件配置中填写 `proxy` 字段（例如 `http://127.0.0.1:7890`），插件的 API 请求与下载会走该代理。
+A: 支持 BV、AV、完整 bilibili 视频链接与 b23.tv 短链。
 
 ---
 
-## 开发与反馈
+## 开发者信息
 
-- 仓库地址: https://github.com/Jinhong270/astrbot_plugin_hfapibilibili
-- 有问题或建议请在 Issues 中反馈。
+- 插件作者：Jinhong270
+- 当前版本：1.8.0 (metadata.yaml)
+- 仓库：https://github.com/Jinhong270/astrbot_plugin_hfapibilibili
+- 如遇问题请在 Issues 中反馈。
 
 ---
 
-<p align="center">如果觉得有用，欢迎点个 ⭐</p>
+<p align="center">如果觉得本插件有用，欢迎点个 ⭐ 支持开源！</p>
