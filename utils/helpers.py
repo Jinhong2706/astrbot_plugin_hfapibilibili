@@ -6,16 +6,6 @@ from typing import Optional
 
 from astrbot.api import logger
 
-def format_download_error(exc: BaseException) -> str:
-    import aiohttp
-    import asyncio
-    if isinstance(exc, aiohttp.ClientResponseError):
-        return f"HTTP {exc.status}: {exc.message}"
-    if isinstance(exc, asyncio.TimeoutError):
-        return "请求超时"
-    text = str(exc).strip()
-    return text or type(exc).__name__
-
 def check_ffmpeg() -> bool:
     return shutil.which("ffmpeg") is not None
 

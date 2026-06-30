@@ -19,6 +19,7 @@ from .core.bilibili_api import BiliAPI
 from .core.session_manager import SessionManager
 from .core.video_processor import download_and_process_video
 from .assets.image_generator import generate_search_image
+from .utils.http_client import check_aria2
 
 try:
     from PIL import Image as PILImage
@@ -48,6 +49,13 @@ class Jinhong270BilibiliPlugin(Star):
         else:
             self.temp_dir = Path(tempfile.gettempdir()) / "astrbot_plugin_hfapibilibili"
         self.temp_dir.mkdir(parents=True, exist_ok=True)
+
+        self.aria2_path = self.plugin_config.aria2_path
+
+        if not check_aria2(self.aria2_path):
+            logger.warning("aria2 未找到，下载功能将不可用。请安装 aria2 或在配置中指定 aria2_path。")
+        if not self.has_ffmpeg:
+            logger.info("ffmpeg 未找到，1080p 画质下载将无法合并音视频。")
 
         self._session = aiohttp.ClientSession(headers=HEADERS, timeout=aiohttp.ClientTimeout(total=300))
         self.bili_api = BiliAPI(self._session, self.plugin_config.api_base_url)
@@ -101,7 +109,7 @@ class Jinhong270BilibiliPlugin(Star):
                 bvid = resolved
             async for result in download_and_process_video(
                 event, bvid, self.bili_api, self._session, self.plugin_config.proxy,
-                self.plugin_config.quality, self.has_ffmpeg, self.temp_dir
+                self.plugin_config.quality, self.has_ffmpeg, self.temp_dir, self.aria2_path
             ):
                 yield result
             return
@@ -116,7 +124,7 @@ class Jinhong270BilibiliPlugin(Star):
             if bvid:
                 async for result in download_and_process_video(
                     event, bvid, self.bili_api, self._session, self.plugin_config.proxy,
-                    self.plugin_config.quality, self.has_ffmpeg, self.temp_dir
+                    self.plugin_config.quality, self.has_ffmpeg, self.temp_dir, self.aria2_path
                 ):
                     yield result
             else:
@@ -170,8 +178,7 @@ class Jinhong270BilibiliPlugin(Star):
         if self.enable_search_image and HAS_PILLOW:
             try:
                 img_path = await generate_search_image(
-                    videos, keyword, self.temp_dir, self.font_path,
-                    self._session, self.plugin_config.proxy
+                    videos, keyword, self.temp_dir, self.font_path, self.plugin_config.proxy
                 )
             except Exception as e:
                 logger.warning(f"生成搜索图片失败: {e}")
@@ -225,7 +232,7 @@ class Jinhong270BilibiliPlugin(Star):
             self.session_mgr.delete(session_key)
             async for result in download_and_process_video(
                 event, bvid, self.bili_api, self._session, self.plugin_config.proxy,
-                self.plugin_config.quality, self.has_ffmpeg, self.temp_dir
+                self.plugin_config.quality, self.has_ffmpeg, self.temp_dir, self.aria2_path
             ):
                 yield result
 
