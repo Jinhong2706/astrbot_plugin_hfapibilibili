@@ -1,8 +1,8 @@
 name: "astrbot_plugin_hfapibilibili"
-display_name: "B站点播"
+display_name: "Bilibili"
 description: "一个下载B站视频的AstrBot插件"
 author: "Jinhong270"
-version: "2.0.0"
+version: "2.0.1"
 repo: "https://github.com/Jinhong270/astrbot_plugin_hfapibilibili"
 astrbot_version: ">=4.16,<5"
 support_platforms:

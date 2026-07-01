@@ -27,7 +27,7 @@ try:
 except ImportError:
     HAS_PILLOW = False
 
-@register("astrbot_plugin_hfapibilibili", "Jinhong270", "B站视频下载器", "2.0.0")
+@register("astrbot_plugin_hfapibilibili", "Jinhong270", "B站视频下载器", "2.0.1")
 class Jinhong270BilibiliPlugin(Star):
     def __init__(self, context: Context, config):
         super().__init__(context)
@@ -51,9 +51,11 @@ class Jinhong270BilibiliPlugin(Star):
         self.temp_dir.mkdir(parents=True, exist_ok=True)
 
         self.aria2_path = self.plugin_config.aria2_path
+        self.download_method = self.plugin_config.download_method
 
-        if not check_aria2(self.aria2_path):
-            logger.warning("aria2 未找到，下载功能将不可用。请安装 aria2 或在配置中指定 aria2_path。")
+        if self.download_method == "aria2c" and not check_aria2(self.aria2_path):
+            logger.warning("aria2 未找到，将自动降级为普通下载。")
+            self.download_method = "direct"
         if not self.has_ffmpeg:
             logger.info("ffmpeg 未找到，1080p 画质下载将无法合并音视频。")
 
@@ -109,7 +111,8 @@ class Jinhong270BilibiliPlugin(Star):
                 bvid = resolved
             async for result in download_and_process_video(
                 event, bvid, self.bili_api, self._session, self.plugin_config.proxy,
-                self.plugin_config.quality, self.has_ffmpeg, self.temp_dir, self.aria2_path
+                self.plugin_config.quality, self.has_ffmpeg, self.temp_dir, self.aria2_path,
+                self.download_method
             ):
                 yield result
             return
@@ -124,7 +127,8 @@ class Jinhong270BilibiliPlugin(Star):
             if bvid:
                 async for result in download_and_process_video(
                     event, bvid, self.bili_api, self._session, self.plugin_config.proxy,
-                    self.plugin_config.quality, self.has_ffmpeg, self.temp_dir, self.aria2_path
+                    self.plugin_config.quality, self.has_ffmpeg, self.temp_dir, self.aria2_path,
+                    self.download_method
                 ):
                     yield result
             else:
@@ -176,7 +180,8 @@ class Jinhong270BilibiliPlugin(Star):
         if self.enable_search_image and HAS_PILLOW:
             try:
                 img_path = await generate_search_image(
-                    videos, "", self.temp_dir, self.font_path, self.plugin_config.proxy
+                    videos, "", self.temp_dir, self.font_path, self.plugin_config.proxy,
+                    self._session, self.download_method, self.aria2_path
                 )
             except Exception as e:
                 logger.warning(f"生成热门图片失败: {e}")
@@ -222,7 +227,8 @@ class Jinhong270BilibiliPlugin(Star):
         if self.enable_search_image and HAS_PILLOW:
             try:
                 img_path = await generate_search_image(
-                    videos, keyword, self.temp_dir, self.font_path, self.plugin_config.proxy
+                    videos, keyword, self.temp_dir, self.font_path, self.plugin_config.proxy,
+                    self._session, self.download_method, self.aria2_path
                 )
             except Exception as e:
                 logger.warning(f"生成搜索图片失败: {e}")
@@ -275,7 +281,8 @@ class Jinhong270BilibiliPlugin(Star):
             self.session_mgr.delete(session_key)
             async for result in download_and_process_video(
                 event, bvid, self.bili_api, self._session, self.plugin_config.proxy,
-                self.plugin_config.quality, self.has_ffmpeg, self.temp_dir, self.aria2_path
+                self.plugin_config.quality, self.has_ffmpeg, self.temp_dir, self.aria2_path,
+                self.download_method
             ):
                 yield result
 

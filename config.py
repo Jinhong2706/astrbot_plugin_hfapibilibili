@@ -18,3 +18,4 @@ class PluginConfig:
         self.custom_font_path = config.get("custom_font_path", "")
         self.enable_search_image = config.get("enable_search_image", True)
         self.aria2_path = config.get("aria2_path", "")
+        self.download_method = config.get("download_method", "aria2c")

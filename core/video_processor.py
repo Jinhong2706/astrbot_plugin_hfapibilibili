@@ -1,5 +1,4 @@
 import asyncio
-import subprocess
 import re
 from pathlib import Path
 
@@ -21,7 +20,7 @@ async def merge_audio_video(video_path: Path, audio_path: Path, output_path: Pat
         return False
 
 async def download_and_process_video(event, bvid: str, bili_api, session, proxy, quality,
-                                     has_ffmpeg, temp_dir, aria2_path):
+                                     has_ffmpeg, temp_dir, aria2_path, download_method):
     if quality == "1080p" and not has_ffmpeg:
         yield event.plain_result("当前环境未安装 ffmpeg，1080p 画质下载的视频将没有声音。建议安装 ffmpeg 以获得完整体验。")
     info_data = await bili_api.get_video_info(bvid)
@@ -51,11 +50,11 @@ async def download_and_process_video(event, bvid: str, bili_api, session, proxy,
     final_path = base_path.with_suffix(".mp4")
     yield event.plain_result("正在下载视频，请稍候...")
     if audio_url and temp_audio_path:
-        video_task = asyncio.create_task(download_file(video_url, temp_video_path, proxy=proxy, aria2_path=aria2_path))
-        audio_task = asyncio.create_task(download_file(audio_url, temp_audio_path, proxy=proxy, aria2_path=aria2_path))
+        video_task = asyncio.create_task(download_file(video_url, temp_video_path, session=session, proxy=proxy, aria2_path=aria2_path, download_method=download_method))
+        audio_task = asyncio.create_task(download_file(audio_url, temp_audio_path, session=session, proxy=proxy, aria2_path=aria2_path, download_method=download_method))
         video_success, audio_success = await asyncio.gather(video_task, audio_task)
     else:
-        video_success = await download_file(video_url, temp_video_path, proxy=proxy, aria2_path=aria2_path)
+        video_success = await download_file(video_url, temp_video_path, session=session, proxy=proxy, aria2_path=aria2_path, download_method=download_method)
         audio_success = True
         temp_audio_path = None
     if not video_success or not temp_video_path.exists():

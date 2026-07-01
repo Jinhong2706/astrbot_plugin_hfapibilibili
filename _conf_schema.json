@@ -6,6 +6,13 @@
     "default": "720p",
     "options": ["720p", "1080p"]
   },
+  "download_method": {
+    "description": "下载方式",
+    "hint": "aria2c 多线程下载（需要安装 aria2）；direct 普通下载。选择 aria2c 但未安装时将自动降级为 direct。",
+    "type": "string",
+    "default": "aria2c",
+    "options": ["aria2c", "direct"]
+  },
   "cache_dir": {
     "description": "视频缓存目录",
     "hint": "留空则使用系统临时目录",

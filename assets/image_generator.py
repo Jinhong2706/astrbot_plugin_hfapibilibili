@@ -10,7 +10,8 @@ from astrbot.api import logger
 from ..utils.http_client import download_file
 
 async def generate_search_image(videos: List[Dict], keyword: str, temp_dir: Path,
-                                font_path: Optional[Path], proxy: str) -> Optional[Path]:
+                                font_path: Optional[Path], proxy: str, session,
+                                download_method: str, aria2_path: str) -> Optional[Path]:
     if not videos:
         return None
 
@@ -47,7 +48,8 @@ async def generate_search_image(videos: List[Dict], keyword: str, temp_dir: Path
             return None
         try:
             save_path = temp_dir / f"cover_{idx}_{int(time.time()*1000)}.jpg"
-            success = await download_file(url, save_path, proxy=proxy)
+            success = await download_file(url, save_path, session=session, proxy=proxy,
+                                          download_method=download_method, aria2_path=aria2_path)
             return save_path if success else None
         except Exception:
             return None
