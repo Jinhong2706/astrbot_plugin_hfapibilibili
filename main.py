@@ -27,7 +27,7 @@ try:
 except ImportError:
     HAS_PILLOW = False
 
-@register("astrbot_plugin_hfapibilibili", "Jinhong270", "B站视频下载器", "1.8.0")
+@register("astrbot_plugin_hfapibilibili", "Jinhong270", "B站视频下载器", "2.0.0")
 class Jinhong270BilibiliPlugin(Star):
     def __init__(self, context: Context, config):
         super().__init__(context)
@@ -151,6 +151,50 @@ class Jinhong270BilibiliPlugin(Star):
             yield event.plain_result("告诉我你想点播的关键词吧～")
         event.stop_event()
 
+    @filter.regex(r'^(?:b站热门|B站热门)$', priority=3)
+    async def get_bilibili_hot(self, event: AstrMessageEvent):
+        data = await self.bili_api.get_hot(ps=self.plugin_config.hot_count)
+        if "error" in data:
+            yield event.plain_result(f"获取热门失败: {data['error']}")
+            return
+        videos = []
+        if isinstance(data, dict):
+            if "data" in data:
+                inner = data["data"]
+                if isinstance(inner, list):
+                    videos = inner
+                elif isinstance(inner, dict):
+                    videos = inner.get("list") or inner.get("vlist") or []
+            elif "list" in data:
+                videos = data["list"]
+        if not videos:
+            yield event.plain_result("热门列表为空")
+            return
+
+        videos = videos[:self.plugin_config.hot_count]
+        img_path = None
+        if self.enable_search_image and HAS_PILLOW:
+            try:
+                img_path = await generate_search_image(
+                    videos, "", self.temp_dir, self.font_path, self.plugin_config.proxy
+                )
+            except Exception as e:
+                logger.warning(f"生成热门图片失败: {e}")
+        if img_path:
+            yield event.image_result(str(img_path))
+        else:
+            result_lines = []
+            for idx, v in enumerate(videos, 1):
+                title = v.get("title", "").replace("<em class=\"keyword\">", "").replace("</em>", "")
+                bvid = v.get("bvid") or v.get("bvid_str") or ""
+                author = v.get("author") or v.get("owner", {}).get("name") or "未知"
+                duration = v.get("duration") or "未知"
+                play = v.get("play") or v.get("stat", {}).get("view") or "0"
+                line = f"{idx}. {title}\nBV:{bvid} | UP:{author}\n时长:{duration} | 播放:{play}"
+                result_lines.append(line)
+            yield event.plain_result("\n\n".join(result_lines))
+        event.stop_event()
+
     async def _do_search(self, event: AstrMessageEvent, keyword: str):
         data = await self.bili_api.search(keyword, page=1, page_size=self.plugin_config.search_result_count)
         if "error" in data:
@@ -195,8 +239,7 @@ class Jinhong270BilibiliPlugin(Star):
                 play = v.get("play") or v.get("stat", {}).get("view") or "0"
                 line = f"{idx}. {title}\nBV:{bvid} | UP:{author}\n时长:{duration} | 播放:{play}"
                 result_lines.append(line)
-            full_result = "\n\n".join(result_lines)
-            yield event.plain_result(full_result)
+            yield event.plain_result("\n\n".join(result_lines))
 
         self.session_mgr.set(event.unified_msg_origin, {
             "state": "awaiting_selection",

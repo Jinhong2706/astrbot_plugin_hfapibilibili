@@ -24,6 +24,12 @@
     "type": "int",
     "default": 20
   },
+  "hot_count": {
+    "description": "热门视频展示数量",
+    "hint": "设置热门指令返回的视频数量，最大值限制为 50。默认 20。",
+    "type": "int",
+    "default": 20
+  },
   "proxy": {
     "description": "HTTP 代理地址",
     "hint": "可选，如 http://127.0.0.1:7890",
@@ -32,7 +38,7 @@
   },
   "api_base_url": {
     "description": "B站 API 服务地址",
-    "hint": "默认使用 Hugging Face 托管服务",
+    "hint": "默认使用 Hugging Face 托管服务，也可自行部署后修改",
     "type": "string",
     "default": "https://jinhong270-api.hf.space"
   },

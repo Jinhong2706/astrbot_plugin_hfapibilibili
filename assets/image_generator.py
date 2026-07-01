@@ -129,7 +129,8 @@ async def generate_search_image(videos: List[Dict], keyword: str, temp_dir: Path
         draw.text((title_x, info_y), meta, fill=(100, 100, 100), font=info_font)
 
     timestamp = int(time.time())
-    img_filename = f"search_{re.sub(r'[\\/*?:\"<>|]', '_', keyword)}_{timestamp}.png"
+    safe_kw = re.sub(r'[\\/*?:"<>|]', '_', keyword) if keyword else "hot"
+    img_filename = f"search_{safe_kw}_{timestamp}.png"
     img_path = temp_dir / img_filename
     img.save(str(img_path), "PNG")
     logger.info(f"搜索图片已生成: {img_path}")

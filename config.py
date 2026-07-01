@@ -10,6 +10,7 @@ class PluginConfig:
     def __init__(self, config: AstrBotConfig):
         self.temp_retention = max(60, config.get("temp_file_retention", 600))
         self.search_result_count = max(1, min(config.get("search_result_count", 20), 50))
+        self.hot_count = max(1, min(config.get("hot_count", 20), 50))
         self.proxy = config.get("proxy", "")
         self.quality = config.get("quality", "720p")
         self.cache_dir = config.get("cache_dir", "")
