@@ -6,21 +6,22 @@ from typing import Optional
 
 from astrbot.api import logger
 
+_CANDIDATE_FONTS = [
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
+    "/System/Library/Fonts/PingFang.ttc",
+    "/System/Library/Fonts/STHeiti Light.ttc",
+    "C:/Windows/Fonts/simhei.ttf",
+    "C:/Windows/Fonts/msyh.ttc",
+    "C:/Windows/Fonts/msyhbd.ttc",
+]
+
 def check_ffmpeg() -> bool:
     return shutil.which("ffmpeg") is not None
 
 def find_chinese_font() -> Optional[Path]:
-    _CANDIDATE_FONTS = [
-        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-        "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
-        "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
-        "/System/Library/Fonts/PingFang.ttc",
-        "/System/Library/Fonts/STHeiti Light.ttc",
-        "C:/Windows/Fonts/simhei.ttf",
-        "C:/Windows/Fonts/msyh.ttc",
-        "C:/Windows/Fonts/msyhbd.ttc",
-    ]
     for font in _CANDIDATE_FONTS:
         p = Path(font)
         if p.exists():
@@ -67,10 +68,7 @@ def format_video_info(data: dict) -> str:
     title = data.get("title") or data.get("Title") or "未知"
     bvid = data.get("bvid") or data.get("Bvid") or "未知"
     owner = data.get("owner", {})
-    if isinstance(owner, dict):
-        owner_name = owner.get("name") or owner.get("Name") or "未知"
-    else:
-        owner_name = "未知"
+    owner_name = owner.get("name") or owner.get("Name") or "未知" if isinstance(owner, dict) else "未知"
     stat = data.get("stat") or data.get("Stat") or {}
     view = stat.get("view") or stat.get("View") or "0"
     like = stat.get("like") or stat.get("Like") or "0"
@@ -80,16 +78,18 @@ def format_video_info(data: dict) -> str:
     danmaku = stat.get("danmaku") or stat.get("Danmaku") or "0"
     desc = data.get("desc") or data.get("Desc") or ""
     pubdate = data.get("pubdate") or data.get("Pubdate") or data.get("ctime") or data.get("Ctime") or 0
+
     if pubdate:
         try:
             pubdate_str = time.strftime("%Y-%m-%d", time.localtime(pubdate))
-        except:
+        except Exception:
             pubdate_str = "未知"
     else:
         pubdate_str = "未知"
+
     link = f"https://www.bilibili.com/video/{bvid}"
 
-    text = (
+    return (
         f"视频标题：{title}\n"
         f"UP主：{owner_name}\n"
         f"视频简介：{desc if desc else '无'}\n\n"
@@ -99,7 +99,6 @@ def format_video_info(data: dict) -> str:
         f"原始链接：{link}\n\n"
         f"Plugin by Jinhong270"
     )
-    return text
 
 def extract_cover(data: dict) -> Optional[str]:
     if not data:
@@ -137,6 +136,7 @@ def select_video_stream(videos: list, quality: str) -> Optional[str]:
     target_width = width_map.get(quality, 0)
     best = None
     best_diff = float('inf')
+
     for v in videos:
         w = v.get("width") or v.get("codec", {}).get("width", 0)
         if w > 0:

@@ -4,6 +4,7 @@ import tempfile
 import time
 import re
 from pathlib import Path
+from typing import List, Optional
 
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
@@ -27,7 +28,38 @@ try:
 except ImportError:
     HAS_PILLOW = False
 
-@register("astrbot_plugin_hfapibilibili", "Jinhong270", "B站视频下载器", "2.0.1")
+
+def _extract_video_list(data, max_count: int) -> List[dict]:
+    videos = []
+    if isinstance(data, dict):
+        if "data" in data:
+            inner = data["data"]
+            if isinstance(inner, list):
+                videos = inner
+            elif isinstance(inner, dict):
+                videos = inner.get("result") or inner.get("list") or inner.get("vlist") or []
+        elif "result" in data:
+            videos = data["result"]
+        elif "list" in data:
+            videos = data["list"]
+    elif isinstance(data, list):
+        videos = data
+    return videos[:max_count]
+
+
+def _format_video_list_text(videos: List[dict]) -> str:
+    lines = []
+    for idx, v in enumerate(videos, 1):
+        title = v.get("title", "").replace("<em class=\"keyword\">", "").replace("</em>", "")
+        bvid = v.get("bvid") or v.get("bvid_str") or ""
+        author = v.get("author") or v.get("owner", {}).get("name") or "未知"
+        duration = v.get("duration") or "未知"
+        play = v.get("play") or v.get("stat", {}).get("view") or "0"
+        lines.append(f"{idx}. {title}\nBV:{bvid} | UP:{author}\n时长:{duration} | 播放:{play}")
+    return "\n\n".join(lines)
+
+
+@register("astrbot_plugin_hfapibilibili", "Jinhong270", "B站视频下载器", "2.0.2")
 class Jinhong270BilibiliPlugin(Star):
     def __init__(self, context: Context, config):
         super().__init__(context)
@@ -59,7 +91,9 @@ class Jinhong270BilibiliPlugin(Star):
         if not self.has_ffmpeg:
             logger.info("ffmpeg 未找到，1080p 画质下载将无法合并音视频。")
 
-        self._session = aiohttp.ClientSession(headers=HEADERS, timeout=aiohttp.ClientTimeout(total=300))
+        self._session = aiohttp.ClientSession(
+            headers=HEADERS, timeout=aiohttp.ClientTimeout(total=300)
+        )
         self.bili_api = BiliAPI(self._session, self.plugin_config.api_base_url)
 
         self._clean_task = asyncio.create_task(self._clean_temp_files_loop())
@@ -87,7 +121,9 @@ class Jinhong270BilibiliPlugin(Star):
     async def _resolve_b23_shortlink(self, short_code: str) -> str:
         url = f"https://b23.tv/{short_code}"
         try:
-            async with self._session.head(url, allow_redirects=False, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+            async with self._session.head(
+                url, allow_redirects=False, timeout=aiohttp.ClientTimeout(total=10)
+            ) as resp:
                 if resp.status in (301, 302, 307, 308):
                     location = resp.headers.get("Location", "")
                     if location:
@@ -97,6 +133,32 @@ class Jinhong270BilibiliPlugin(Star):
         except Exception as e:
             logger.error(f"解析短链失败 {short_code}: {e}")
         return ""
+
+    async def _download_video(self, event: AstrMessageEvent, bvid: str):
+        async for result in download_and_process_video(
+            event, bvid, self.bili_api, self._session, self.plugin_config.proxy,
+            self.plugin_config.quality, self.has_ffmpeg, self.temp_dir,
+            self.aria2_path, self.download_method
+        ):
+            yield result
+
+    async def _show_video_results(self, event: AstrMessageEvent, videos: List[dict],
+                                   keyword: str = ""):
+        img_path = None
+        if self.enable_search_image and HAS_PILLOW:
+            try:
+                img_path = await generate_search_image(
+                    videos, keyword, self.temp_dir, self.font_path,
+                    self.plugin_config.proxy, self._session,
+                    self.download_method, self.aria2_path
+                )
+            except Exception as e:
+                logger.warning(f"生成图片失败: {e}")
+
+        if img_path:
+            yield event.image_result(str(img_path))
+        else:
+            yield event.plain_result(_format_video_list_text(videos))
 
     @filter.regex(r'(?i).*(bilibili\.com/video/|BV[a-zA-Z0-9]{10}|b23\.tv|av\d+).*')
     async def handle_bilibili_link(self, event: AstrMessageEvent):
@@ -109,11 +171,7 @@ class Jinhong270BilibiliPlugin(Star):
                     yield event.plain_result("短链解析失败，请稍后重试或使用完整 BV 号。")
                     return
                 bvid = resolved
-            async for result in download_and_process_video(
-                event, bvid, self.bili_api, self._session, self.plugin_config.proxy,
-                self.plugin_config.quality, self.has_ffmpeg, self.temp_dir, self.aria2_path,
-                self.download_method
-            ):
+            async for result in self._download_video(event, bvid):
                 yield result
             return
 
@@ -125,11 +183,7 @@ class Jinhong270BilibiliPlugin(Star):
                 return
             bvid = info_data.get("data", {}).get("bvid")
             if bvid:
-                async for result in download_and_process_video(
-                    event, bvid, self.bili_api, self._session, self.plugin_config.proxy,
-                    self.plugin_config.quality, self.has_ffmpeg, self.temp_dir, self.aria2_path,
-                    self.download_method
-                ):
+                async for result in self._download_video(event, bvid):
                     yield result
             else:
                 yield event.plain_result("无法从 AV 号获取 BV 号。")
@@ -161,91 +215,31 @@ class Jinhong270BilibiliPlugin(Star):
         if "error" in data:
             yield event.plain_result(f"获取热门失败: {data['error']}")
             return
-        videos = []
-        if isinstance(data, dict):
-            if "data" in data:
-                inner = data["data"]
-                if isinstance(inner, list):
-                    videos = inner
-                elif isinstance(inner, dict):
-                    videos = inner.get("list") or inner.get("vlist") or []
-            elif "list" in data:
-                videos = data["list"]
+
+        videos = _extract_video_list(data, self.plugin_config.hot_count)
         if not videos:
             yield event.plain_result("热门列表为空")
             return
 
-        videos = videos[:self.plugin_config.hot_count]
-        img_path = None
-        if self.enable_search_image and HAS_PILLOW:
-            try:
-                img_path = await generate_search_image(
-                    videos, "", self.temp_dir, self.font_path, self.plugin_config.proxy,
-                    self._session, self.download_method, self.aria2_path
-                )
-            except Exception as e:
-                logger.warning(f"生成热门图片失败: {e}")
-        if img_path:
-            yield event.image_result(str(img_path))
-        else:
-            result_lines = []
-            for idx, v in enumerate(videos, 1):
-                title = v.get("title", "").replace("<em class=\"keyword\">", "").replace("</em>", "")
-                bvid = v.get("bvid") or v.get("bvid_str") or ""
-                author = v.get("author") or v.get("owner", {}).get("name") or "未知"
-                duration = v.get("duration") or "未知"
-                play = v.get("play") or v.get("stat", {}).get("view") or "0"
-                line = f"{idx}. {title}\nBV:{bvid} | UP:{author}\n时长:{duration} | 播放:{play}"
-                result_lines.append(line)
-            yield event.plain_result("\n\n".join(result_lines))
+        async for result in self._show_video_results(event, videos, ""):
+            yield result
         event.stop_event()
 
     async def _do_search(self, event: AstrMessageEvent, keyword: str):
-        data = await self.bili_api.search(keyword, page=1, page_size=self.plugin_config.search_result_count)
+        data = await self.bili_api.search(
+            keyword, page=1, page_size=self.plugin_config.search_result_count
+        )
         if "error" in data:
             yield event.plain_result(f"搜索失败: {data['error']}")
             return
 
-        videos = []
-        if isinstance(data, dict):
-            if "data" in data:
-                videos = data["data"].get("result") or data["data"].get("list") or []
-            elif "result" in data:
-                videos = data["result"]
-            elif "list" in data:
-                videos = data["list"]
-        elif isinstance(data, list):
-            videos = data
-
+        videos = _extract_video_list(data, self.plugin_config.search_result_count)
         if not videos:
             yield event.plain_result(f"未找到关于 '{keyword}' 的视频。")
             return
 
-        videos = videos[:self.plugin_config.search_result_count]
-
-        img_path = None
-        if self.enable_search_image and HAS_PILLOW:
-            try:
-                img_path = await generate_search_image(
-                    videos, keyword, self.temp_dir, self.font_path, self.plugin_config.proxy,
-                    self._session, self.download_method, self.aria2_path
-                )
-            except Exception as e:
-                logger.warning(f"生成搜索图片失败: {e}")
-
-        if img_path:
-            yield event.image_result(str(img_path))
-        else:
-            result_lines = []
-            for idx, v in enumerate(videos, 1):
-                title = v.get("title", "").replace("<em class=\"keyword\">", "").replace("</em>", "")
-                bvid = v.get("bvid") or v.get("bvid_str") or ""
-                author = v.get("author") or v.get("owner", {}).get("name") or "未知"
-                duration = v.get("duration") or "未知"
-                play = v.get("play") or v.get("stat", {}).get("view") or "0"
-                line = f"{idx}. {title}\nBV:{bvid} | UP:{author}\n时长:{duration} | 播放:{play}"
-                result_lines.append(line)
-            yield event.plain_result("\n\n".join(result_lines))
+        async for result in self._show_video_results(event, videos, keyword):
+            yield result
 
         self.session_mgr.set(event.unified_msg_origin, {
             "state": "awaiting_selection",
@@ -259,12 +253,15 @@ class Jinhong270BilibiliPlugin(Star):
         session = self.session_mgr.get(session_key)
         if not session:
             return
+
         msg = event.message_str.strip()
+
         if session["state"] == "awaiting_keyword":
             self.session_mgr.delete(session_key)
             async for result in self._do_search(event, msg):
                 yield result
             return
+
         if session["state"] == "awaiting_selection":
             if not msg.isdigit():
                 return
@@ -279,11 +276,7 @@ class Jinhong270BilibiliPlugin(Star):
                 yield event.plain_result("获取视频信息失败")
                 return
             self.session_mgr.delete(session_key)
-            async for result in download_and_process_video(
-                event, bvid, self.bili_api, self._session, self.plugin_config.proxy,
-                self.plugin_config.quality, self.has_ffmpeg, self.temp_dir, self.aria2_path,
-                self.download_method
-            ):
+            async for result in self._download_video(event, bvid):
                 yield result
 
     async def terminate(self):
@@ -293,4 +286,4 @@ class Jinhong270BilibiliPlugin(Star):
             self._clean_task.cancel()
         if self._session and not self._session.closed:
             await self._session.close()
-        logger.info("astrbot_plugin_hfapibilibili插件已停止。")
+        logger.info("astrbot_plugin_hfapibilibili 插件已停止。")

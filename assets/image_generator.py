@@ -48,8 +48,10 @@ async def generate_search_image(videos: List[Dict], keyword: str, temp_dir: Path
             return None
         try:
             save_path = temp_dir / f"cover_{idx}_{int(time.time()*1000)}.jpg"
-            success = await download_file(url, save_path, session=session, proxy=proxy,
-                                          download_method=download_method, aria2_path=aria2_path)
+            success = await download_file(
+                url, save_path, session=session, proxy=proxy,
+                download_method=download_method, aria2_path=aria2_path
+            )
             return save_path if success else None
         except Exception:
             return None
@@ -110,21 +112,9 @@ async def generate_search_image(videos: List[Dict], keyword: str, temp_dir: Path
             else:
                 lines[1] += "..."
 
-        def draw_colored_text(d, text, xy, font, kw):
-            if not kw:
-                d.text(xy, text, fill=(0, 0, 0), font=font)
-                return
-            parts = re.split(f'({re.escape(kw)})', text, flags=re.IGNORECASE)
-            x, y = xy
-            for part in parts:
-                if not part:
-                    continue
-                color = (255, 0, 0) if part.lower() == kw.lower() else (0, 0, 0)
-                d.text((x, y), part, fill=color, font=font)
-                x += d.textlength(part, font=font)
-
         for j, line in enumerate(lines):
-            draw_colored_text(draw, line, (title_x, title_y + j * (title_font_size + line_spacing)), title_font, keyword)
+            _draw_colored_line(draw, line, (title_x, title_y + j * (title_font_size + line_spacing)),
+                              title_font, keyword)
 
         info_y = y + card_h - info_font_size - 4
         meta = f"{author} · {play}播放 · {duration}"
@@ -137,3 +127,17 @@ async def generate_search_image(videos: List[Dict], keyword: str, temp_dir: Path
     img.save(str(img_path), "PNG")
     logger.info(f"搜索图片已生成: {img_path}")
     return img_path
+
+
+def _draw_colored_line(draw, text: str, xy: tuple, font, keyword: str):
+    if not keyword:
+        draw.text(xy, text, fill=(0, 0, 0), font=font)
+        return
+    parts = re.split(f'({re.escape(keyword)})', text, flags=re.IGNORECASE)
+    x, y = xy
+    for part in parts:
+        if not part:
+            continue
+        color = (255, 0, 0) if part.lower() == keyword.lower() else (0, 0, 0)
+        draw.text((x, y), part, fill=color, font=font)
+        x += draw.textlength(part, font=font)

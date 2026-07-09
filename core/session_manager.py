@@ -16,7 +16,10 @@ class SessionManager:
 
     def cleanup_expired(self, timeout_seconds: int = 180):
         now = time.time()
-        expired = [k for k, s in self.user_sessions.items()
-                   if s.get("state") == "awaiting_selection" and (now - s.get("timestamp", 0) > timeout_seconds)]
+        expired = [
+            k for k, s in self.user_sessions.items()
+            if s.get("state") == "awaiting_selection"
+            and (now - s.get("timestamp", 0) > timeout_seconds)
+        ]
         for k in expired:
             self.user_sessions.pop(k, None)
