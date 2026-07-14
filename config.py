@@ -19,3 +19,11 @@ class PluginConfig:
         self.enable_search_image = config.get("enable_search_image", True)
         self.aria2_path = config.get("aria2_path", "")
         self.download_method = config.get("download_method", "aria2c")
+        self.enable_blacklist = config.get("enable_blacklist", False)
+        blacklist_raw = config.get("blacklist_ids", "")
+        self.blacklist_ids = set()
+        if self.enable_blacklist and blacklist_raw:
+            for line in blacklist_raw.strip().split("\n"):
+                uid = line.strip()
+                if uid:
+                    self.blacklist_ids.add(uid)

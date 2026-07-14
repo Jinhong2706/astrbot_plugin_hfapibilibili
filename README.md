@@ -15,6 +15,9 @@ AstrBot B 站视频插件 —— 在聊天中解析、点播并下载 B 站高�
 - aria2 多线程高速下载，自动降级为普通下载
 - 支持 HTTP 代理
 - 交互式点播会话管理，超时自动清理
+- **用户隔离**：每个用户独立的点播会话，互不干扰
+- **停止点播自动清理**：说出"停止点播"后自动删除该用户已下载的封面图片
+- **黑名单**：支持通过用户 ID 配置黑名单，禁止指定用户使用插件
 
 ## 安装
 
@@ -42,8 +45,12 @@ brew install aria2       # macOS
 | `b站点播 关键词` | 搜索并选择下载 |
 | `b站点播` | 进入交互式点播对话 |
 | `b站热门` | 展示当前热门视频 |
-| `停止点播` | 退出点播会话 |
+| `停止点播` | 退出点播会话并清理封面图片 |
 | 搜索结果中回复序号 | 下载对应视频 |
+
+### 用户隔离
+
+每个用户的点播会话相互独立。当用户 A 进入点播模式后，仅用户 A 的后续消息会被识别为搜索词输入，其他用户的消息不会影响 A 的会话。
 
 ### 支持的链接格式
 
@@ -67,6 +74,8 @@ brew install aria2       # macOS
 | `custom_font_path` | string | (空) | 自定义中文字体路径 |
 | `enable_search_image` | bool | `true` | 是否生成搜索/热门图片（需 Pillow） |
 | `aria2_path` | string | (空) | aria2c 可执行文件路径 |
+| `enable_blacklist` | bool | `false` | 是否启用黑名单 |
+| `blacklist_ids` | text | (空) | 黑名单用户 ID，每行一个 |
 
 ## 重试机制
 
@@ -98,10 +107,14 @@ A: 在插件配置中填写 `proxy` 字段，如 `http://127.0.0.1:7890`。
 
 A: 安装 aria2 或将 `download_method` 设为 `direct` 使用普通下载。
 
+**Q: 如何禁止某个用户使用插件？**
+
+A: 在插件配置中启用 `enable_blacklist`，然后在 `blacklist_ids` 中填写该用户的 ID（每行一个），该用户将无法使用本插件的任何功能。
+
 ## 开发者
 
 - 作者：Jinhong270
-- 版本：2.0.2
+- 版本：2.0.3
 - 仓库：[Jinhong270/astrbot_plugin_hfapibilibili](https://github.com/Jinhong270/astrbot_plugin_hfapibilibili)
 - 问题反馈：[Issues](https://github.com/Jinhong270/astrbot_plugin_hfapibilibili/issues)
 

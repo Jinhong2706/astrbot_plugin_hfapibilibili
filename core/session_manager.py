@@ -1,9 +1,10 @@
 import time
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 class SessionManager:
     def __init__(self):
         self.user_sessions: Dict[str, dict] = {}
+        self.user_covers: Dict[str, List[str]] = {}
 
     def get(self, key: str) -> Optional[dict]:
         return self.user_sessions.get(key)
@@ -14,6 +15,14 @@ class SessionManager:
     def delete(self, key: str):
         self.user_sessions.pop(key, None)
 
+    def add_covers(self, key: str, paths: List[str]):
+        if key not in self.user_covers:
+            self.user_covers[key] = []
+        self.user_covers[key].extend(paths)
+
+    def pop_covers(self, key: str) -> List[str]:
+        return self.user_covers.pop(key, [])
+
     def cleanup_expired(self, timeout_seconds: int = 180):
         now = time.time()
         expired = [
@@ -23,3 +32,4 @@ class SessionManager:
         ]
         for k in expired:
             self.user_sessions.pop(k, None)
+            self.user_covers.pop(k, None)

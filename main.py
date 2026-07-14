@@ -4,7 +4,7 @@ import tempfile
 import time
 import re
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
@@ -59,7 +59,7 @@ def _format_video_list_text(videos: List[dict]) -> str:
     return "\n\n".join(lines)
 
 
-@register("astrbot_plugin_hfapibilibili", "Jinhong270", "B站视频下载器", "2.0.2")
+@register("astrbot_plugin_hfapibilibili", "Jinhong270", "B站视频下载器", "2.0.3")
 class Jinhong270BilibiliPlugin(Star):
     def __init__(self, context: Context, config):
         super().__init__(context)
@@ -98,6 +98,16 @@ class Jinhong270BilibiliPlugin(Star):
 
         self._clean_task = asyncio.create_task(self._clean_temp_files_loop())
         self._session_timeout_task = asyncio.create_task(self._check_session_timeout())
+
+    def _make_session_key(self, event: AstrMessageEvent) -> str:
+        sender_id = event.get_sender_id()
+        return f"{event.unified_msg_origin}:{sender_id}"
+
+    def _is_blacklisted(self, event: AstrMessageEvent) -> bool:
+        if not self.plugin_config.enable_blacklist:
+            return False
+        sender_id = event.get_sender_id()
+        return sender_id in self.plugin_config.blacklist_ids
 
     async def _clean_temp_files_loop(self):
         try:
@@ -144,24 +154,29 @@ class Jinhong270BilibiliPlugin(Star):
 
     async def _show_video_results(self, event: AstrMessageEvent, videos: List[dict],
                                    keyword: str = ""):
-        img_path = None
+        session_key = self._make_session_key(event)
         if self.enable_search_image and HAS_PILLOW:
             try:
-                img_path = await generate_search_image(
+                result = await generate_search_image(
                     videos, keyword, self.temp_dir, self.font_path,
                     self.plugin_config.proxy, self._session,
                     self.download_method, self.aria2_path
                 )
+                if result:
+                    img_path, cover_paths = result
+                    if cover_paths:
+                        self.session_mgr.add_covers(session_key, [str(p) for p in cover_paths])
+                    yield event.image_result(str(img_path))
+                    return
             except Exception as e:
                 logger.warning(f"生成图片失败: {e}")
 
-        if img_path:
-            yield event.image_result(str(img_path))
-        else:
-            yield event.plain_result(_format_video_list_text(videos))
+        yield event.plain_result(_format_video_list_text(videos))
 
     @filter.regex(r'(?i).*(bilibili\.com/video/|BV[a-zA-Z0-9]{10}|b23\.tv|av\d+).*')
     async def handle_bilibili_link(self, event: AstrMessageEvent):
+        if self._is_blacklisted(event):
+            return
         msg = event.message_str.strip()
         bvid = extract_bvid(msg)
         if bvid:
@@ -190,14 +205,26 @@ class Jinhong270BilibiliPlugin(Star):
 
     @filter.regex(r'^\s*停止点播\s*$', priority=1)
     async def search_stop(self, event: AstrMessageEvent):
-        session_key = event.unified_msg_origin
+        if self._is_blacklisted(event):
+            return
+        session_key = self._make_session_key(event)
+        covers = self.session_mgr.pop_covers(session_key)
+        for cover_path in covers:
+            try:
+                p = Path(cover_path)
+                if p.exists():
+                    p.unlink(missing_ok=True)
+            except Exception:
+                pass
         if self.session_mgr.get(session_key):
             self.session_mgr.delete(session_key)
-            yield event.plain_result("已退出点播会话。")
+            yield event.plain_result("已退出点播会话，已清理下载的封面图片。")
         event.stop_event()
 
     @filter.regex(r'^(?:b站点播|B站点播)(?:\s+(.+))?$', priority=2)
     async def on_bili_demand(self, event: AstrMessageEvent):
+        if self._is_blacklisted(event):
+            return
         msg = event.message_str.strip()
         m = re.match(r'^(?:b站点播|B站点播)(?:\s+(.+))?$', msg)
         keyword = m.group(1) if m and m.group(1) else None
@@ -205,12 +232,15 @@ class Jinhong270BilibiliPlugin(Star):
             async for result in self._do_search(event, keyword.strip()):
                 yield result
         else:
-            self.session_mgr.set(event.unified_msg_origin, {"state": "awaiting_keyword"})
+            session_key = self._make_session_key(event)
+            self.session_mgr.set(session_key, {"state": "awaiting_keyword"})
             yield event.plain_result("告诉我你想点播的关键词吧～")
         event.stop_event()
 
     @filter.regex(r'^(?:b站热门|B站热门)$', priority=3)
     async def get_bilibili_hot(self, event: AstrMessageEvent):
+        if self._is_blacklisted(event):
+            return
         data = await self.bili_api.get_hot(ps=self.plugin_config.hot_count)
         if "error" in data:
             yield event.plain_result(f"获取热门失败: {data['error']}")
@@ -226,6 +256,7 @@ class Jinhong270BilibiliPlugin(Star):
         event.stop_event()
 
     async def _do_search(self, event: AstrMessageEvent, keyword: str):
+        session_key = self._make_session_key(event)
         data = await self.bili_api.search(
             keyword, page=1, page_size=self.plugin_config.search_result_count
         )
@@ -241,7 +272,7 @@ class Jinhong270BilibiliPlugin(Star):
         async for result in self._show_video_results(event, videos, keyword):
             yield result
 
-        self.session_mgr.set(event.unified_msg_origin, {
+        self.session_mgr.set(session_key, {
             "state": "awaiting_selection",
             "videos": videos,
             "timestamp": time.time()
@@ -249,7 +280,9 @@ class Jinhong270BilibiliPlugin(Star):
 
     @filter.regex(r'.*', priority=100)
     async def handle_user_reply(self, event: AstrMessageEvent):
-        session_key = event.unified_msg_origin
+        if self._is_blacklisted(event):
+            return
+        session_key = self._make_session_key(event)
         session = self.session_mgr.get(session_key)
         if not session:
             return

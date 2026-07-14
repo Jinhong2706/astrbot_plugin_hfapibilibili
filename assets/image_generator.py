@@ -2,7 +2,7 @@ import re
 import time
 import asyncio
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 
 from PIL import Image, ImageDraw, ImageFont
 from astrbot.api import logger
@@ -11,7 +11,7 @@ from ..utils.http_client import download_file
 
 async def generate_search_image(videos: List[Dict], keyword: str, temp_dir: Path,
                                 font_path: Optional[Path], proxy: str, session,
-                                download_method: str, aria2_path: str) -> Optional[Path]:
+                                download_method: str, aria2_path: str) -> Optional[Tuple[Path, List[Path]]]:
     if not videos:
         return None
 
@@ -63,6 +63,7 @@ async def generate_search_image(videos: List[Dict], keyword: str, temp_dir: Path
             pic = "https:" + pic
         tasks.append(download_cover(idx, pic))
     cover_paths = await asyncio.gather(*tasks)
+    valid_covers = [p for p in cover_paths if p is not None and p.exists()]
 
     img = Image.new("RGB", (WIDTH, img_height), (255, 255, 255))
     draw = ImageDraw.Draw(img)
@@ -126,7 +127,7 @@ async def generate_search_image(videos: List[Dict], keyword: str, temp_dir: Path
     img_path = temp_dir / img_filename
     img.save(str(img_path), "PNG")
     logger.info(f"搜索图片已生成: {img_path}")
-    return img_path
+    return (img_path, valid_covers)
 
 
 def _draw_colored_line(draw, text: str, xy: tuple, font, keyword: str):

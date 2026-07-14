@@ -66,5 +66,17 @@
     "hint": "留空则自动从系统 PATH 查找。例如：/usr/bin/aria2c 或 C:/Program Files/aria2/aria2c.exe",
     "type": "string",
     "default": ""
+  },
+  "enable_blacklist": {
+    "description": "是否启用黑名单",
+    "hint": "启用后黑名单中的用户无法使用本插件",
+    "type": "bool",
+    "default": false
+  },
+  "blacklist_ids": {
+    "description": "黑名单用户ID",
+    "hint": "每行一个用户ID，黑名单中的用户无法使用本插件的任何功能",
+    "type": "text",
+    "default": ""
   }
 }
