@@ -8,7 +8,7 @@ AstrBot B 站视频插件 —— 在聊天中解析、点播并下载 B 站高�
 
 ## 功能
 
-- 自动解析 B 站视频链接（完整链接、BV 号、AV 号、b23.tv 短链）
+- 整条消息仅为完整 B 站视频链接（BV1 / av116339171728674）时自动解析并下载
 - 按关键词点播搜索，返回图文卡片 / 纯文本结果
 - `b站热门` 快速查看当前热门视频
 - Dash 分离流音视频合并（需 ffmpeg）
@@ -41,7 +41,7 @@ brew install aria2       # macOS
 
 | 触发方式 | 说明 |
 |----------|------|
-| 直接发送 BV/AV/链接 | 自动解析并下载视频 |
+| 整条消息发送完整 B 站视频链接 | 自动解析并下载视频 |
 | `b站点播 关键词` | 搜索并选择下载 |
 | `b站点播` | 进入交互式点播对话 |
 | `b站热门` | 展示当前热门视频 |
@@ -52,12 +52,22 @@ brew install aria2       # macOS
 
 每个用户的点播会话相互独立。当用户 A 进入点播模式后，仅用户 A 的后续消息会被识别为搜索词输入，其他用户的消息不会影响 A 的会话。
 
-### 支持的链接格式
+### 自动下载触发规则
 
-- `https://www.bilibili.com/video/BV1U47T6UE1t`
-- `BV1U47T6UE1t`
-- `av116339171728674`
-- `https://b23.tv/BV14XLq64EQf`
+**仅当整条消息内容就是一条完整视频链接时才会触发下载**（前后可有空白，不可夹杂其他文字）：
+
+| 格式 | 示例 |
+|------|------|
+| BV1 视频链接 | `https://www.bilibili.com/video/BV1U47T6UE1t` |
+| av116339171728674 开头的 AV 视频链接 | `https://www.bilibili.com/video/av116339171728674` |
+
+以下情况**不会**触发自动下载：
+
+- 单独的 BV 号 / AV 号（如 `BV1U47T6UE1t`、`av116339171728674`）
+- 消息中混有其他文字，如 `看看这个 https://www.bilibili.com/video/BV1...`
+- 链接中的 BV 不以 `BV1` 开头
+- 链接中的 AV 不以 `av116339171728674` 开头（如 `av116339171728674`、`av116339171728674`）
+- b23.tv 短链
 
 ## 配置项
 
@@ -111,10 +121,14 @@ A: 安装 aria2 或将 `download_method` 设为 `direct` 使用普通下载。
 
 A: 在插件配置中启用 `enable_blacklist`，然后在 `blacklist_ids` 中填写该用户的 ID（每行一个），该用户将无法使用本插件的任何功能。
 
+**Q: 发送了视频链接为什么没有下载？**
+
+A: 请确认整条消息只有一条完整 `https://www.bilibili.com/video/...` 链接（BV1 或 av116339171728674 开头），不要只发 BV/AV 号，也不要夹杂其他文字。b23.tv 短链不会自动下载。
+
 ## 开发者
 
 - 作者：Jinhong270
-- 版本：2.0.3
+- 版本：2.0.4
 - 仓库：[Jinhong270/astrbot_plugin_hfapibilibili](https://github.com/Jinhong270/astrbot_plugin_hfapibilibili)
 - 问题反馈：[Issues](https://github.com/Jinhong270/astrbot_plugin_hfapibilibili/issues)
 

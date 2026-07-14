@@ -5,16 +5,14 @@ import time
 import re
 from pathlib import Path
 from typing import List
-
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
 from astrbot.api.message_components import Image, Plain
-
 from .config import PluginConfig, HEADERS
 from .utils.helpers import (
     check_ffmpeg, find_chinese_font, extract_bvid, extract_avid,
-    format_video_info, extract_cover
+    format_video_info, extract_cover, resolve_b23_url
 )
 from .core.bilibili_api import BiliAPI
 from .core.session_manager import SessionManager
@@ -27,7 +25,6 @@ try:
     HAS_PILLOW = True
 except ImportError:
     HAS_PILLOW = False
-
 
 def _extract_video_list(data, max_count: int) -> List[dict]:
     videos = []
@@ -46,7 +43,6 @@ def _extract_video_list(data, max_count: int) -> List[dict]:
         videos = data
     return videos[:max_count]
 
-
 def _format_video_list_text(videos: List[dict]) -> str:
     lines = []
     for idx, v in enumerate(videos, 1):
@@ -58,44 +54,36 @@ def _format_video_list_text(videos: List[dict]) -> str:
         lines.append(f"{idx}. {title}\nBV:{bvid} | UP:{author}\n时长:{duration} | 播放:{play}")
     return "\n\n".join(lines)
 
-
-@register("astrbot_plugin_hfapibilibili", "Jinhong270", "B站视频下载器", "2.0.3")
+@register("astrbot_plugin_hfapibilibili", "Jinhong270", "B站视频下载器", "2.0.4")
 class Jinhong270BilibiliPlugin(Star):
     def __init__(self, context: Context, config):
         super().__init__(context)
         self.plugin_config = PluginConfig(config)
         self.has_ffmpeg = check_ffmpeg()
-
         custom_font = self.plugin_config.custom_font_path
         if custom_font and Path(custom_font).exists():
             self.font_path = Path(custom_font)
             logger.info(f"使用自定义字体: {self.font_path}")
         else:
             self.font_path = find_chinese_font()
-
         self.enable_search_image = self.plugin_config.enable_search_image
         self.session_mgr = SessionManager()
-
         if self.plugin_config.cache_dir:
             self.temp_dir = Path(self.plugin_config.cache_dir)
         else:
             self.temp_dir = Path(tempfile.gettempdir()) / "astrbot_plugin_hfapibilibili"
         self.temp_dir.mkdir(parents=True, exist_ok=True)
-
         self.aria2_path = self.plugin_config.aria2_path
         self.download_method = self.plugin_config.download_method
-
         if self.download_method == "aria2c" and not check_aria2(self.aria2_path):
             logger.warning("aria2 未找到，将自动降级为普通下载。")
             self.download_method = "direct"
         if not self.has_ffmpeg:
             logger.info("ffmpeg 未找到，1080p 画质下载将无法合并音视频。")
-
         self._session = aiohttp.ClientSession(
             headers=HEADERS, timeout=aiohttp.ClientTimeout(total=300)
         )
         self.bili_api = BiliAPI(self._session, self.plugin_config.api_base_url)
-
         self._clean_task = asyncio.create_task(self._clean_temp_files_loop())
         self._session_timeout_task = asyncio.create_task(self._check_session_timeout())
 
@@ -128,22 +116,6 @@ class Jinhong270BilibiliPlugin(Star):
         except asyncio.CancelledError:
             pass
 
-    async def _resolve_b23_shortlink(self, short_code: str) -> str:
-        url = f"https://b23.tv/{short_code}"
-        try:
-            async with self._session.head(
-                url, allow_redirects=False, timeout=aiohttp.ClientTimeout(total=10)
-            ) as resp:
-                if resp.status in (301, 302, 307, 308):
-                    location = resp.headers.get("Location", "")
-                    if location:
-                        bvid = extract_bvid(location)
-                        if bvid:
-                            return bvid
-        except Exception as e:
-            logger.error(f"解析短链失败 {short_code}: {e}")
-        return ""
-
     async def _download_video(self, event: AstrMessageEvent, bvid: str):
         async for result in download_and_process_video(
             event, bvid, self.bili_api, self._session, self.plugin_config.proxy,
@@ -170,26 +142,22 @@ class Jinhong270BilibiliPlugin(Star):
                     return
             except Exception as e:
                 logger.warning(f"生成图片失败: {e}")
-
         yield event.plain_result(_format_video_list_text(videos))
 
-    @filter.regex(r'(?i).*(bilibili\.com/video/|BV[a-zA-Z0-9]{10}|b23\.tv|av\d+).*')
+    @filter.regex(
+        r'^\s*https?://(?:www\.)?bilibili\.com/video/'
+        r'(?:[Bb][Vv]1[a-zA-Z0-9]{9}|[Aa][Vv]11\d*)'
+        r'(?:[/?#]\S*)?\s*$'
+    )
     async def handle_bilibili_link(self, event: AstrMessageEvent):
         if self._is_blacklisted(event):
             return
         msg = event.message_str.strip()
         bvid = extract_bvid(msg)
         if bvid:
-            if not bvid.startswith("BV"):
-                resolved = await self._resolve_b23_shortlink(bvid)
-                if not resolved:
-                    yield event.plain_result("短链解析失败，请稍后重试或使用完整 BV 号。")
-                    return
-                bvid = resolved
             async for result in self._download_video(event, bvid):
                 yield result
             return
-
         avid = extract_avid(msg)
         if avid:
             info_data = await self.bili_api.get_video_info_by_aid(avid)
@@ -202,6 +170,23 @@ class Jinhong270BilibiliPlugin(Star):
                     yield result
             else:
                 yield event.plain_result("无法从 AV 号获取 BV 号。")
+
+    @filter.regex(r'^\s*https?://b23\.tv/\S+\s*$', priority=0)
+    async def handle_b23_link(self, event: AstrMessageEvent):
+        if self._is_blacklisted(event):
+            return
+        msg = event.message_str.strip()
+        target_url = await resolve_b23_url(self._session, msg)
+        if not target_url:
+            yield event.plain_result("无法解析短链，请检查链接是否有效。")
+            return
+        match = re.search(r'[Bb][Vv]1[a-zA-Z0-9]{9}', target_url)
+        if not match:
+            yield event.plain_result("短链解析后未能找到 BV 号。")
+            return
+        bvid = match.group(0)
+        async for result in self._download_video(event, bvid):
+            yield result
 
     @filter.regex(r'^\s*停止点播\s*$', priority=1)
     async def search_stop(self, event: AstrMessageEvent):
@@ -245,12 +230,10 @@ class Jinhong270BilibiliPlugin(Star):
         if "error" in data:
             yield event.plain_result(f"获取热门失败: {data['error']}")
             return
-
         videos = _extract_video_list(data, self.plugin_config.hot_count)
         if not videos:
             yield event.plain_result("热门列表为空")
             return
-
         async for result in self._show_video_results(event, videos, ""):
             yield result
         event.stop_event()
@@ -263,15 +246,12 @@ class Jinhong270BilibiliPlugin(Star):
         if "error" in data:
             yield event.plain_result(f"搜索失败: {data['error']}")
             return
-
         videos = _extract_video_list(data, self.plugin_config.search_result_count)
         if not videos:
             yield event.plain_result(f"未找到关于 '{keyword}' 的视频。")
             return
-
         async for result in self._show_video_results(event, videos, keyword):
             yield result
-
         self.session_mgr.set(session_key, {
             "state": "awaiting_selection",
             "videos": videos,
@@ -286,15 +266,12 @@ class Jinhong270BilibiliPlugin(Star):
         session = self.session_mgr.get(session_key)
         if not session:
             return
-
         msg = event.message_str.strip()
-
         if session["state"] == "awaiting_keyword":
             self.session_mgr.delete(session_key)
             async for result in self._do_search(event, msg):
                 yield result
             return
-
         if session["state"] == "awaiting_selection":
             if not msg.isdigit():
                 return
